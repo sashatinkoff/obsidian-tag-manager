@@ -14,14 +14,27 @@ class ApplyConfirmModal extends obsidian_1.Modal {
         const icon = contentEl.createDiv({ cls: "tra-modal-icon" });
         (0, obsidian_1.setIcon)(icon, "shield-check");
         contentEl.createEl("h2", { text: "Применить изменения?" });
-        contentEl.createEl("p", { text: `Будет обработано ${this.affectedCount} ${(0, utils_1.pluralRu)(this.affectedCount, "заметка", "заметки", "заметок")} и применено ${this.changes.length} ${(0, utils_1.pluralRu)(this.changes.length, "переименование", "переименования", "переименований")}.` });
+        const renameCount = this.changes.filter((change) => change.action !== "delete" && change.newTag !== null).length;
+        const deleteCount = this.changes.length - renameCount;
+        const actionSummary = [
+            renameCount ? `${renameCount} ${(0, utils_1.pluralRu)(renameCount, "переименование", "переименования", "переименований")}` : "",
+            deleteCount ? `${deleteCount} ${(0, utils_1.pluralRu)(deleteCount, "удаление тега", "удаления тега", "удалений тегов")}` : "",
+        ].filter(Boolean).join(" и ");
+        contentEl.createEl("p", { text: `Будет обработано ${this.affectedCount} ${(0, utils_1.pluralRu)(this.affectedCount, "заметка", "заметки", "заметок")}. ${actionSummary ? `В очереди: ${actionSummary}.` : ""}` });
         const changes = contentEl.createDiv({ cls: "tra-modal-changes" });
         for (const change of this.changes) {
             const row = changes.createDiv({ cls: "tra-modal-change" });
             row.createSpan({ text: `#${change.oldTag}` });
-            const arrow = row.createSpan({ cls: "tra-modal-arrow" });
-            (0, obsidian_1.setIcon)(arrow, "arrow-right");
-            row.createSpan({ text: `#${change.newTag}` });
+            if (change.action === "delete" || change.newTag === null) {
+                const remove = row.createSpan({ cls: "tra-modal-delete" });
+                (0, obsidian_1.setIcon)(remove, "trash-2");
+                row.createSpan({ text: "Удалить тег" });
+            }
+            else {
+                const arrow = row.createSpan({ cls: "tra-modal-arrow" });
+                (0, obsidian_1.setIcon)(arrow, "arrow-right");
+                row.createSpan({ text: `#${change.newTag}` });
+            }
         }
         if (this.mergedTargets.length > 0) {
             const warning = contentEl.createDiv({ cls: "tra-modal-warning" });

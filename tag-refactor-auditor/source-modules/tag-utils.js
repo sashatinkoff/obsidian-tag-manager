@@ -46,10 +46,11 @@ function makeChangeMap(changes, caseSensitive) {
     const map = new Map();
     for (const change of changes) {
         const oldTag = normalizeTag(change.oldTag);
-        const newTag = normalizeTag(change.newTag);
-        if (!oldTag || !newTag)
+        const isDelete = change.action === "delete" || change.newTag === null;
+        const newTag = isDelete ? null : normalizeTag(change.newTag);
+        if (!oldTag || (!isDelete && !newTag))
             continue;
-        map.set(tagKey(oldTag, caseSensitive), newTag);
+        map.set(tagKey(oldTag, caseSensitive), isDelete ? null : newTag);
     }
     return map;
 }
@@ -101,11 +102,12 @@ function replaceBodyTags(body, changes, caseSensitive) {
                 return part;
             return part.replace(tagPattern, (matched) => {
                 const rawOld = matched.slice(1);
-                const replacement = changeMap.get(tagKey(rawOld, caseSensitive));
-                if (!replacement)
+                const key = tagKey(rawOld, caseSensitive);
+                if (!changeMap.has(key))
                     return matched;
+                const replacement = changeMap.get(key);
                 changed = true;
-                return `#${replacement}`;
+                return replacement === null ? "" : `#${replacement}`;
             });
         })
             .join("");
@@ -211,7 +213,6 @@ function replaceYamlScalar(raw, changes, caseSensitive) {
         }
     }
     else {
-        // In plain YAML scalars, a hash starts a comment when preceded by whitespace.
         const commentAt = token.search(/\s+#/);
         if (commentAt >= 0) {
             suffix = token.slice(commentAt);
@@ -224,9 +225,12 @@ function replaceYamlScalar(raw, changes, caseSensitive) {
     const normalized = normalizeTag(decoded.value);
     if (!normalized)
         return raw;
-    const replacement = changes.get(tagKey(normalized, caseSensitive));
-    if (!replacement)
+    const key = tagKey(normalized, caseSensitive);
+    if (!changes.has(key))
         return raw;
+    const replacement = changes.get(key);
+    if (replacement === null)
+        return null;
     return `${leading}${encodeYamlScalar(replacement, decoded.quote)}${trailing}${suffix}`;
 }
 function replaceYamlLineValue(line, colonIndex, changes, caseSensitive) {
@@ -243,20 +247,28 @@ function replaceYamlLineValue(line, colonIndex, changes, caseSensitive) {
         if (!items)
             return { line, changed: false };
         let changed = false;
-        const rewritten = items
-            .map((item) => {
+        let removedAny = false;
+        const rewrittenItems = [];
+        for (const item of items) {
             const next = replaceYamlScalar(item, changes, caseSensitive);
             if (next !== item)
                 changed = true;
-            return next;
-        })
-            .join(",");
+            if (next === null) {
+                removedAny = true;
+                continue;
+            }
+            rewrittenItems.push(next);
+        }
+        if (removedAny && rewrittenItems.length === 0)
+            return { line: null, changed: true };
         return {
-            line: `${prefix}${leading}[${rewritten}]${remaining.slice(closingIndex + 1)}`,
+            line: `${prefix}${leading}[${rewrittenItems.join(",")}]${remaining.slice(closingIndex + 1)}`,
             changed,
         };
     }
     const rewritten = replaceYamlScalar(value, changes, caseSensitive);
+    if (rewritten === null)
+        return { line: null, changed: true };
     return { line: `${prefix}${rewritten}`, changed: rewritten !== value };
 }
 function findFlowListClosing(value) {
@@ -299,8 +311,6 @@ function replaceYamlTags(frontmatter, changes, caseSensitive) {
     const changeMap = makeChangeMap(changes, caseSensitive);
     if (changeMap.size === 0)
         return { text: frontmatter, changed: false };
-    // Validate YAML before editing. If the frontmatter is already malformed, leave
-    // it untouched rather than making a potentially worse situation.
     try {
         (0, obsidian_1.parseYaml)(frontmatter);
     }
@@ -311,18 +321,26 @@ function replaceYamlTags(frontmatter, changes, caseSensitive) {
     const lines = frontmatter.split(/\r?\n/);
     let changed = false;
     for (let i = 0; i < lines.length; i += 1) {
-        // Only top-level `tag:` and `tags:` properties are handled here.
         const match = lines[i].match(/^(tags?|tag)\s*:/);
         if (!match)
             continue;
         const colonIndex = lines[i].indexOf(":");
         const rewritten = replaceYamlLineValue(lines[i], colonIndex, changeMap, caseSensitive);
+        if (rewritten.line === null) {
+            lines.splice(i, 1);
+            i -= 1;
+            changed = true;
+            continue;
+        }
         lines[i] = rewritten.line;
-        changed || (changed = rewritten.changed);
+        changed ||= rewritten.changed;
         const valueAfterColon = lines[i].slice(colonIndex + 1).trim();
         if (valueAfterColon !== "")
             continue;
-        // Block-style arrays such as `tags:\n  - foo`. Stop at the next top-level key.
+
+        // Process block arrays such as `tags:\n  - one`. Removing a scalar removes
+        // that list item; if all items were removed, remove the now-empty property.
+        let hadListItem = false;
         for (let j = i + 1; j < lines.length; j += 1) {
             if (lines[j].trim() === "")
                 continue;
@@ -331,9 +349,34 @@ function replaceYamlTags(frontmatter, changes, caseSensitive) {
             const listItem = lines[j].match(/^(\s*-\s+)(.*)$/);
             if (!listItem)
                 continue;
+            hadListItem = true;
             const replacement = replaceYamlScalar(listItem[2], changeMap, caseSensitive);
+            if (replacement === null) {
+                lines.splice(j, 1);
+                j -= 1;
+                changed = true;
+                continue;
+            }
             if (replacement !== listItem[2]) {
                 lines[j] = `${listItem[1]}${replacement}`;
+                changed = true;
+            }
+        }
+        if (hadListItem) {
+            let hasRemainingListItem = false;
+            for (let j = i + 1; j < lines.length; j += 1) {
+                if (lines[j].trim() === "")
+                    continue;
+                if (!/^\s/.test(lines[j]))
+                    break;
+                if (/^\s*-\s+/.test(lines[j])) {
+                    hasRemainingListItem = true;
+                    break;
+                }
+            }
+            if (!hasRemainingListItem) {
+                lines.splice(i, 1);
+                i -= 1;
                 changed = true;
             }
         }

@@ -24,6 +24,16 @@ class TagAuditorSettingTab extends obsidian_1.PluginSettingTab {
             await this.plugin.saveSettings();
         }));
         new obsidian_1.Setting(containerEl)
+            .setName("YAML-атрибут даты создания заметки")
+            .setDesc("Имя поля YAML, например created. Если поле указано, сортировка по дате использует его; заметки без корректной даты идут в конец. Если поле пустое, используется дата создания файла.")
+            .addText((text) => text
+            .setPlaceholder("created")
+            .setValue(this.plugin.settings.createdDateProperty)
+            .onChange(async (value) => {
+            this.plugin.settings.createdDateProperty = value.trim();
+            await this.plugin.saveSettings();
+        }));
+        new obsidian_1.Setting(containerEl)
             .setName("Учитывать регистр")
             .setDesc("При включении #Project и #project считаются разными тегами.")
             .addToggle((toggle) => toggle

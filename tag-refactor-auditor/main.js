@@ -11,7 +11,9 @@ const VIEW_TYPE = "tag-refactor-auditor-view";
 const DEFAULT_SETTINGS = {
   previewChars: 400,
   caseSensitive: false,
-  ignoredFolders: ["Templates"]
+  ignoredFolders: ["Templates"],
+  createdDateProperty: "",
+  minTagMentions: 0
 };
 
 
@@ -63,10 +65,11 @@ function makeChangeMap(changes, caseSensitive) {
     const map = new Map();
     for (const change of changes) {
         const oldTag = normalizeTag(change.oldTag);
-        const newTag = normalizeTag(change.newTag);
-        if (!oldTag || !newTag)
+        const isDelete = change.action === "delete" || change.newTag === null;
+        const newTag = isDelete ? null : normalizeTag(change.newTag);
+        if (!oldTag || (!isDelete && !newTag))
             continue;
-        map.set(tagKey(oldTag, caseSensitive), newTag);
+        map.set(tagKey(oldTag, caseSensitive), isDelete ? null : newTag);
     }
     return map;
 }
@@ -118,11 +121,12 @@ function replaceBodyTags(body, changes, caseSensitive) {
                 return part;
             return part.replace(tagPattern, (matched) => {
                 const rawOld = matched.slice(1);
-                const replacement = changeMap.get(tagKey(rawOld, caseSensitive));
-                if (!replacement)
+                const key = tagKey(rawOld, caseSensitive);
+                if (!changeMap.has(key))
                     return matched;
+                const replacement = changeMap.get(key);
                 changed = true;
-                return `#${replacement}`;
+                return replacement === null ? "" : `#${replacement}`;
             });
         })
             .join("");
@@ -228,7 +232,6 @@ function replaceYamlScalar(raw, changes, caseSensitive) {
         }
     }
     else {
-        // In plain YAML scalars, a hash starts a comment when preceded by whitespace.
         const commentAt = token.search(/\s+#/);
         if (commentAt >= 0) {
             suffix = token.slice(commentAt);
@@ -241,9 +244,12 @@ function replaceYamlScalar(raw, changes, caseSensitive) {
     const normalized = normalizeTag(decoded.value);
     if (!normalized)
         return raw;
-    const replacement = changes.get(tagKey(normalized, caseSensitive));
-    if (!replacement)
+    const key = tagKey(normalized, caseSensitive);
+    if (!changes.has(key))
         return raw;
+    const replacement = changes.get(key);
+    if (replacement === null)
+        return null;
     return `${leading}${encodeYamlScalar(replacement, decoded.quote)}${trailing}${suffix}`;
 }
 function replaceYamlLineValue(line, colonIndex, changes, caseSensitive) {
@@ -260,20 +266,28 @@ function replaceYamlLineValue(line, colonIndex, changes, caseSensitive) {
         if (!items)
             return { line, changed: false };
         let changed = false;
-        const rewritten = items
-            .map((item) => {
+        let removedAny = false;
+        const rewrittenItems = [];
+        for (const item of items) {
             const next = replaceYamlScalar(item, changes, caseSensitive);
             if (next !== item)
                 changed = true;
-            return next;
-        })
-            .join(",");
+            if (next === null) {
+                removedAny = true;
+                continue;
+            }
+            rewrittenItems.push(next);
+        }
+        if (removedAny && rewrittenItems.length === 0)
+            return { line: null, changed: true };
         return {
-            line: `${prefix}${leading}[${rewritten}]${remaining.slice(closingIndex + 1)}`,
+            line: `${prefix}${leading}[${rewrittenItems.join(",")}]${remaining.slice(closingIndex + 1)}`,
             changed,
         };
     }
     const rewritten = replaceYamlScalar(value, changes, caseSensitive);
+    if (rewritten === null)
+        return { line: null, changed: true };
     return { line: `${prefix}${rewritten}`, changed: rewritten !== value };
 }
 function findFlowListClosing(value) {
@@ -316,8 +330,6 @@ function replaceYamlTags(frontmatter, changes, caseSensitive) {
     const changeMap = makeChangeMap(changes, caseSensitive);
     if (changeMap.size === 0)
         return { text: frontmatter, changed: false };
-    // Validate YAML before editing. If the frontmatter is already malformed, leave
-    // it untouched rather than making a potentially worse situation.
     try {
         (0, obsidian_1.parseYaml)(frontmatter);
     }
@@ -328,18 +340,26 @@ function replaceYamlTags(frontmatter, changes, caseSensitive) {
     const lines = frontmatter.split(/\r?\n/);
     let changed = false;
     for (let i = 0; i < lines.length; i += 1) {
-        // Only top-level `tag:` and `tags:` properties are handled here.
         const match = lines[i].match(/^(tags?|tag)\s*:/);
         if (!match)
             continue;
         const colonIndex = lines[i].indexOf(":");
         const rewritten = replaceYamlLineValue(lines[i], colonIndex, changeMap, caseSensitive);
+        if (rewritten.line === null) {
+            lines.splice(i, 1);
+            i -= 1;
+            changed = true;
+            continue;
+        }
         lines[i] = rewritten.line;
-        changed || (changed = rewritten.changed);
+        changed ||= rewritten.changed;
         const valueAfterColon = lines[i].slice(colonIndex + 1).trim();
         if (valueAfterColon !== "")
             continue;
-        // Block-style arrays such as `tags:\n  - foo`. Stop at the next top-level key.
+
+        // Process block arrays such as `tags:\n  - one`. Removing a scalar removes
+        // that list item; if all items were removed, remove the now-empty property.
+        let hadListItem = false;
         for (let j = i + 1; j < lines.length; j += 1) {
             if (lines[j].trim() === "")
                 continue;
@@ -348,9 +368,34 @@ function replaceYamlTags(frontmatter, changes, caseSensitive) {
             const listItem = lines[j].match(/^(\s*-\s+)(.*)$/);
             if (!listItem)
                 continue;
+            hadListItem = true;
             const replacement = replaceYamlScalar(listItem[2], changeMap, caseSensitive);
+            if (replacement === null) {
+                lines.splice(j, 1);
+                j -= 1;
+                changed = true;
+                continue;
+            }
             if (replacement !== listItem[2]) {
                 lines[j] = `${listItem[1]}${replacement}`;
+                changed = true;
+            }
+        }
+        if (hadListItem) {
+            let hasRemainingListItem = false;
+            for (let j = i + 1; j < lines.length; j += 1) {
+                if (lines[j].trim() === "")
+                    continue;
+                if (!/^\s/.test(lines[j]))
+                    break;
+                if (/^\s*-\s+/.test(lines[j])) {
+                    hasRemainingListItem = true;
+                    break;
+                }
+            }
+            if (!hasRemainingListItem) {
+                lines.splice(i, 1);
+                i -= 1;
                 changed = true;
             }
         }
@@ -518,14 +563,27 @@ class ApplyConfirmModal extends obsidian_1.Modal {
         const icon = contentEl.createDiv({ cls: "tra-modal-icon" });
         (0, obsidian_1.setIcon)(icon, "shield-check");
         contentEl.createEl("h2", { text: "Применить изменения?" });
-        contentEl.createEl("p", { text: `Будет обработано ${this.affectedCount} ${(0, utils_1.pluralRu)(this.affectedCount, "заметка", "заметки", "заметок")} и применено ${this.changes.length} ${(0, utils_1.pluralRu)(this.changes.length, "переименование", "переименования", "переименований")}.` });
+        const renameCount = this.changes.filter((change) => change.action !== "delete" && change.newTag !== null).length;
+        const deleteCount = this.changes.length - renameCount;
+        const actionSummary = [
+            renameCount ? `${renameCount} ${(0, utils_1.pluralRu)(renameCount, "переименование", "переименования", "переименований")}` : "",
+            deleteCount ? `${deleteCount} ${(0, utils_1.pluralRu)(deleteCount, "удаление тега", "удаления тега", "удалений тегов")}` : "",
+        ].filter(Boolean).join(" и ");
+        contentEl.createEl("p", { text: `Будет обработано ${this.affectedCount} ${(0, utils_1.pluralRu)(this.affectedCount, "заметка", "заметки", "заметок")}. ${actionSummary ? `В очереди: ${actionSummary}.` : ""}` });
         const changes = contentEl.createDiv({ cls: "tra-modal-changes" });
         for (const change of this.changes) {
             const row = changes.createDiv({ cls: "tra-modal-change" });
             row.createSpan({ text: `#${change.oldTag}` });
-            const arrow = row.createSpan({ cls: "tra-modal-arrow" });
-            (0, obsidian_1.setIcon)(arrow, "arrow-right");
-            row.createSpan({ text: `#${change.newTag}` });
+            if (change.action === "delete" || change.newTag === null) {
+                const remove = row.createSpan({ cls: "tra-modal-delete" });
+                (0, obsidian_1.setIcon)(remove, "trash-2");
+                row.createSpan({ text: "Удалить тег" });
+            }
+            else {
+                const arrow = row.createSpan({ cls: "tra-modal-arrow" });
+                (0, obsidian_1.setIcon)(arrow, "arrow-right");
+                row.createSpan({ text: `#${change.newTag}` });
+            }
         }
         if (this.mergedTargets.length > 0) {
             const warning = contentEl.createDiv({ cls: "tra-modal-warning" });
@@ -632,6 +690,16 @@ class TagAuditorSettingTab extends obsidian_1.PluginSettingTab {
             await this.plugin.saveSettings();
         }));
         new obsidian_1.Setting(containerEl)
+            .setName("YAML-атрибут даты создания заметки")
+            .setDesc("Имя поля YAML, например created. Если поле указано, сортировка по дате использует его; заметки без корректной даты идут в конец. Если поле пустое, используется дата создания файла.")
+            .addText((text) => text
+            .setPlaceholder("created")
+            .setValue(this.plugin.settings.createdDateProperty)
+            .onChange(async (value) => {
+            this.plugin.settings.createdDateProperty = value.trim();
+            await this.plugin.saveSettings();
+        }));
+        new obsidian_1.Setting(containerEl)
             .setName("Учитывать регистр")
             .setDesc("При включении #Project и #project считаются разными тегами.")
             .addToggle((toggle) => toggle
@@ -666,6 +734,51 @@ class TagAuditorSettingTab extends obsidian_1.PluginSettingTab {
 
 
 /* ===== view.js ===== */
+function parseCreationDate(value) {
+    if (value instanceof Date)
+        return Number.isFinite(value.getTime()) ? value.getTime() : 0;
+    if (typeof value === "number") {
+        if (!Number.isFinite(value))
+            return 0;
+        if (Number.isInteger(value) && value >= 19000101 && value <= 29991231) {
+            const raw = String(value);
+            const parsed = Date.parse(`${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}T00:00:00`);
+            return Number.isFinite(parsed) ? parsed : 0;
+        }
+        if (Math.abs(value) >= 1000000000000)
+            return value;
+        if (Math.abs(value) >= 1000000000)
+            return value * 1000;
+        return 0;
+    }
+    if (typeof value !== "string")
+        return 0;
+    const raw = value.trim();
+    if (!raw)
+        return 0;
+    if (/^\d{13}$/.test(raw))
+        return Number(raw);
+    if (/^\d{10}$/.test(raw))
+        return Number(raw) * 1000;
+    const compact = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+    if (compact) {
+        const parsed = Date.parse(`${compact[1]}-${compact[2]}-${compact[3]}T00:00:00`);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+    const parsed = Date.parse(raw);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+function getFrontmatterProperty(frontmatter, property) {
+    if (!frontmatter || typeof frontmatter !== "object")
+        return undefined;
+    if (Object.prototype.hasOwnProperty.call(frontmatter, property))
+        return frontmatter[property];
+    return property.split(".").reduce((current, part) => {
+        if (current && typeof current === "object" && Object.prototype.hasOwnProperty.call(current, part))
+            return current[part];
+        return undefined;
+    }, frontmatter);
+}
 class TagAuditorView extends obsidian_1.ItemView {
     constructor(leaf, plugin) {
         super(leaf);
@@ -726,28 +839,51 @@ class TagAuditorView extends obsidian_1.ItemView {
         search.value = this.query;
 
         const listHeader = tagBrowser.createDiv({ cls: "tra-section-heading" });
-        listHeader.createEl("span", { text: "Все теги" });
-        const sectionTools = listHeader.createDiv({ cls: "tra-section-tools" });
-        sectionTools.createSpan({ cls: "tra-muted", text: `${this.plugin.tagIndex.size}` });
-        const sortSelect = sectionTools.createEl("select", {
+        listHeader.createEl("span", { text: "Теги" });
+        const tagTotal = listHeader.createSpan({ cls: "tra-tag-total", text: String(this.plugin.tagIndex.size) });
+
+        const sortControl = tagBrowser.createDiv({ cls: "tra-sort-control" });
+        const sortLabel = sortControl.createEl("label", { cls: "tra-sort-label", text: "Сортировка тегов" });
+        const sortSelect = sortControl.createEl("select", {
             cls: "tra-sort-select",
             attr: {
                 "aria-label": "Сортировка тегов",
-                title: "Последнее упоминание определяется по дате изменения самой свежей заметки с тегом",
+                title: "Сортировка по самой поздней дате создания заметки с тегом. Источник даты задаётся в настройках.",
             },
         });
+        sortLabel.setAttr("for", sortSelect.id = `tra-sort-${Math.random().toString(36).slice(2, 9)}`);
         const sortOptions = [
             ["name", "По названию"],
-            ["recent", "По последнему упоминанию"],
-            ["count", "По количеству"],
+            ["recent", "По дате создания заметки"],
+            ["count", "По количеству заметок"],
         ];
-        for (const [value, label] of sortOptions) {
+        for (const [value, label] of sortOptions)
             sortSelect.createEl("option", { text: label, attr: { value } });
-        }
         sortSelect.value = this.sortMode;
 
+        const mentionFilter = tagBrowser.createDiv({ cls: "tra-mention-filter" });
+        const mentionLabel = mentionFilter.createEl("label", {
+            cls: "tra-sort-label",
+            text: "Порог упоминаний (число заметок)",
+        });
+        const mentionInput = mentionFilter.createEl("input", {
+            cls: "tra-threshold-input",
+            attr: {
+                type: "number",
+                min: "0",
+                step: "1",
+                placeholder: "0",
+                title: "Пусто или 0 — показывать все теги",
+                "aria-label": "Минимальное число заметок с тегом",
+            },
+        });
+        mentionInput.value = String(this.plugin.settings.minTagMentions ?? 0);
+        mentionLabel.setAttr("for", mentionInput.id = `tra-min-mentions-${Math.random().toString(36).slice(2, 9)}`);
+
         const list = tagBrowser.createDiv({ cls: "tra-tag-list" });
-        const renderList = () => this.renderTagRows(list, search.value);
+        const renderList = () => {
+            tagTotal.setText(String(this.renderTagRows(list, search.value)));
+        };
         search.addEventListener("input", () => {
             this.query = search.value;
             renderList();
@@ -755,6 +891,13 @@ class TagAuditorView extends obsidian_1.ItemView {
         sortSelect.addEventListener("change", () => {
             this.sortMode = sortSelect.value;
             renderList();
+        });
+        mentionInput.addEventListener("input", () => {
+            const raw = mentionInput.value.trim();
+            const parsed = raw === "" ? 0 : Number.parseInt(raw, 10);
+            this.plugin.settings.minTagMentions = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+            renderList();
+            void this.plugin.saveData(this.plugin.settings);
         });
         renderList();
 
@@ -781,19 +924,28 @@ class TagAuditorView extends obsidian_1.ItemView {
         stat.createDiv({ cls: "tra-stat-label", text: label });
         stat.createDiv({ cls: "tra-stat-value", text: value });
     }
+    getNoteCreationTimestamp(file) {
+        const property = (this.plugin.settings.createdDateProperty ?? "").trim();
+        if (!property)
+            return file.stat?.ctime ?? 0;
+        const frontmatter = this.plugin.app.metadataCache.getFileCache(file)?.frontmatter;
+        return parseCreationDate(getFrontmatterProperty(frontmatter, property));
+    }
     renderTagRows(parent, query) {
         parent.empty();
         const normalizedQuery = query.trim().replace(/^#/, "").toLocaleLowerCase();
-        const entries = [...this.plugin.tagIndex.values()].filter((info) => info.tag.toLocaleLowerCase().includes(normalizedQuery));
+        const configuredThreshold = Number(this.plugin.settings.minTagMentions ?? 0);
+        const threshold = Number.isFinite(configuredThreshold) ? Math.max(0, Math.floor(configuredThreshold)) : 0;
+        const entries = [...this.plugin.tagIndex.values()].filter((info) => info.files.length >= threshold && info.tag.toLocaleLowerCase().includes(normalizedQuery));
         const compareByName = (a, b) => a.tag.localeCompare(b.tag, undefined, {
             sensitivity: this.plugin.settings.caseSensitive ? "variant" : "base",
             numeric: true,
         });
-        // Obsidian does not store a separate timestamp for each tag token, so
-        // “last mention” uses the mtime of the most recently modified note that contains it.
+        // Sort each tag by the newest creation date among notes containing it.
+        // Date source: configured YAML property, or file ctime when the setting is empty.
         const latestTimes = new Map(entries.map((info) => [
             info.key,
-            info.files.reduce((latest, file) => Math.max(latest, file.stat?.mtime ?? 0), 0),
+            info.files.reduce((latest, file) => Math.max(latest, this.getNoteCreationTimestamp(file)), 0),
         ]));
         entries.sort((a, b) => {
             if (this.sortMode === "count")
@@ -806,9 +958,9 @@ class TagAuditorView extends obsidian_1.ItemView {
             const empty = parent.createDiv({ cls: "tra-empty" });
             const icon = empty.createDiv({ cls: "tra-empty-icon" });
             (0, obsidian_1.setIcon)(icon, normalizedQuery ? "search-x" : "tags");
-            empty.createEl("p", { text: normalizedQuery ? "Ничего не найдено" : "Теги не найдены" });
-            empty.createEl("span", { text: normalizedQuery ? "Попробуйте другой запрос." : "После сканирования здесь появятся теги из заметок." });
-            return;
+            empty.createEl("p", { text: normalizedQuery || threshold > 0 ? "Ничего не найдено" : "Теги не найдены" });
+            empty.createEl("span", { text: normalizedQuery || threshold > 0 ? "Измените поиск или уменьшите порог упоминаний." : "После сканирования здесь появятся теги из заметок." });
+            return 0;
         }
         for (const info of entries) {
             const isSelected = this.selectedTag !== null && (0, tag_utils_1.tagKey)(this.selectedTag, this.plugin.settings.caseSensitive) === info.key;
@@ -831,6 +983,7 @@ class TagAuditorView extends obsidian_1.ItemView {
                 this.render();
             });
         }
+        return entries.length;
     }
     renderSelectedTag(root) {
         if (!this.selectedTag) {
@@ -865,6 +1018,16 @@ class TagAuditorView extends obsidian_1.ItemView {
         const addButton = fieldRow.createEl("button", { cls: "tra-primary-button tra-add-button", text: "В очередь" });
         addButton.type = "button";
         const warning = form.createDiv({ cls: "tra-inline-warning" });
+        const destructiveActions = form.createDiv({ cls: "tra-destructive-actions" });
+        const deleteButton = destructiveActions.createEl("button", {
+            cls: "tra-danger-button",
+            attr: { type: "button", title: `Добавить удаление #${info.tag} в очередь` },
+        });
+        const deleteIcon = deleteButton.createSpan({ cls: "tra-button-icon" });
+        (0, obsidian_1.setIcon)(deleteIcon, "trash-2");
+        deleteButton.createSpan({ text: "Удалить тег из всех заметок" });
+        destructiveActions.createEl("small", { text: "Удаление затронет текст и YAML-фронтматтер." });
+        deleteButton.addEventListener("click", () => this.plugin.addDeleteTagChange(info.tag));
         const updateWarning = () => {
             const value = (0, tag_utils_1.cleanTagInput)(input.value);
             warning.empty();
@@ -936,12 +1099,12 @@ class TagAuditorView extends obsidian_1.ItemView {
                 const maxChars = this.plugin.settings.previewChars;
                 const start = plainIndex >= 0 ? Math.max(0, plainIndex - Math.floor(maxChars * 0.28)) : 0;
                 const excerpt = withoutFrontmatter.slice(start, start + maxChars);
-                const excerptEl = item.createDiv({ cls: "tra-excerpt" });
-                if (start > 0)
-                    excerptEl.createSpan({ text: "…" });
-                (0, utils_1.appendExcerptWithHighlight)(excerptEl, excerpt, info.tag, this.plugin.settings.caseSensitive);
-                if (start + maxChars < withoutFrontmatter.length)
-                    excerptEl.createSpan({ text: "…" });
+                const excerptEl = item.createDiv({ cls: "tra-excerpt markdown-rendered" });
+                const renderedExcerpt = `${start > 0 ? "…\n\n" : ""}${excerpt}${start + maxChars < withoutFrontmatter.length ? "\n\n…" : ""}`;
+                // Render the snippet with Obsidian's Markdown engine, so headings,
+                // lists, emphasis, links, tables, and other Markdown syntax appear as layout.
+                await obsidian_1.MarkdownRenderer.render(this.plugin.app, renderedExcerpt, excerptEl, file.path, this);
+                this.highlightRenderedTag(excerptEl, info.tag);
             }
             catch {
                 item.createDiv({ cls: "tra-excerpt tra-muted", text: "Не удалось прочитать заметку." });
@@ -968,6 +1131,47 @@ class TagAuditorView extends obsidian_1.ItemView {
             });
         }
     }
+    highlightRenderedTag(container, tag) {
+        const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const flags = this.plugin.settings.caseSensitive ? "gu" : "giu";
+        const pattern = new RegExp(`(?<![\\p{L}\\p{N}_/#-])#?${escapedTag}(?![\\p{L}\\p{N}_/-])`, flags);
+        const walker = document.createTreeWalker(container, 4 /* SHOW_TEXT */);
+        const textNodes = [];
+        let node;
+        while ((node = walker.nextNode())) {
+            const parent = node.parentElement;
+            if (!parent || parent.closest("code, pre, script, style, mark.tra-highlight"))
+                continue;
+            if (pattern.test(node.nodeValue ?? "")) {
+                pattern.lastIndex = 0;
+                textNodes.push(node);
+            }
+            pattern.lastIndex = 0;
+        }
+        for (const textNode of textNodes) {
+            const text = textNode.nodeValue ?? "";
+            const fragment = document.createDocumentFragment();
+            let cursor = 0;
+            pattern.lastIndex = 0;
+            let match;
+            while ((match = pattern.exec(text)) !== null) {
+                if (match.index > cursor)
+                    fragment.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+                const mark = document.createElement("mark");
+                mark.className = "tra-highlight";
+                mark.textContent = match[0];
+                fragment.appendChild(mark);
+                cursor = match.index + match[0].length;
+                if (match[0].length === 0)
+                    pattern.lastIndex += 1;
+            }
+            if (cursor === 0)
+                continue;
+            if (cursor < text.length)
+                fragment.appendChild(document.createTextNode(text.slice(cursor)));
+            textNode.parentNode?.replaceChild(fragment, textNode);
+        }
+    }
     renderPendingChanges(root) {
         const changes = this.plugin.getPendingChanges();
         const section = root.createDiv({ cls: "tra-queue-card" });
@@ -982,7 +1186,7 @@ class TagAuditorView extends obsidian_1.ItemView {
         if (changes.length === 0) {
             const empty = section.createDiv({ cls: "tra-queue-empty" });
             empty.createEl("span", { text: "Очередь пока пуста" });
-            empty.createEl("small", { text: "Выберите тег выше и задайте новое имя." });
+            empty.createEl("small", { text: "Выберите тег, чтобы переименовать его или удалить из заметок." });
             return;
         }
         const list = section.createDiv({ cls: "tra-queue-list" });
@@ -990,9 +1194,16 @@ class TagAuditorView extends obsidian_1.ItemView {
             const row = list.createDiv({ cls: "tra-queue-row" });
             const mapping = row.createDiv({ cls: "tra-queue-mapping" });
             mapping.createDiv({ cls: "tra-queue-old", text: `#${change.oldTag}` });
-            const arrow = mapping.createDiv({ cls: "tra-queue-arrow" });
-            (0, obsidian_1.setIcon)(arrow, "arrow-right");
-            mapping.createDiv({ cls: "tra-queue-new", text: `#${change.newTag}` });
+            if (change.action === "delete" || change.newTag === null) {
+                const deleteTarget = mapping.createDiv({ cls: "tra-queue-delete" });
+                (0, obsidian_1.setIcon)(deleteTarget.createSpan(), "trash-2");
+                deleteTarget.createSpan({ text: "Удалить тег" });
+            }
+            else {
+                const arrow = mapping.createDiv({ cls: "tra-queue-arrow" });
+                (0, obsidian_1.setIcon)(arrow, "arrow-right");
+                mapping.createDiv({ cls: "tra-queue-new", text: `#${change.newTag}` });
+            }
             const info = this.plugin.getTagInfo(change.oldTag);
             row.createDiv({ cls: "tra-queue-files", text: `${info?.files.length ?? 0} ${(0, utils_1.pluralRu)(info?.files.length ?? 0, "заметка", "заметки", "заметок")}` });
             const remove = row.createEl("button", { cls: "tra-remove-change", attr: { type: "button", title: "Убрать из очереди", "aria-label": `Убрать #${change.oldTag}` } });
@@ -1079,6 +1290,10 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
             ignoredFolders: Array.isArray(loaded?.ignoredFolders)
                 ? loaded.ignoredFolders.filter((path) => typeof path === "string")
                 : [...constants_1.DEFAULT_SETTINGS.ignoredFolders],
+            createdDateProperty: typeof loaded?.createdDateProperty === "string"
+                ? loaded.createdDateProperty.trim()
+                : constants_1.DEFAULT_SETTINGS.createdDateProperty,
+            minTagMentions: (0, utils_1.clampNumber)(loaded?.minTagMentions, 0, 1000000, constants_1.DEFAULT_SETTINGS.minTagMentions),
         };
     }
     async saveSettings() {
@@ -1162,7 +1377,24 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
             new obsidian_1.Notice(`Тег #${oldTag} больше не найден. Обновите список тегов.`);
             return false;
         }
-        this.pendingChanges.set(oldKey, { oldTag: this.tagIndex.get(oldKey)?.tag ?? oldTag, newTag });
+        this.pendingChanges.set(oldKey, { oldTag: this.tagIndex.get(oldKey)?.tag ?? oldTag, newTag, action: "rename" });
+        this.refreshViews();
+        return true;
+    }
+    addDeleteTagChange(oldTagValue) {
+        const oldTag = (0, tag_utils_1.normalizeTag)(oldTagValue);
+        if (!oldTag) {
+            new obsidian_1.Notice("Не удалось определить тег для удаления.");
+            return false;
+        }
+        const oldKey = (0, tag_utils_1.tagKey)(oldTag, this.settings.caseSensitive);
+        const info = this.tagIndex.get(oldKey);
+        if (!info) {
+            new obsidian_1.Notice(`Тег #${oldTag} больше не найден. Обновите список тегов.`);
+            return false;
+        }
+        this.pendingChanges.set(oldKey, { oldTag: info.tag, newTag: null, action: "delete" });
+        new obsidian_1.Notice(`Удаление #${info.tag} добавлено в очередь.`);
         this.refreshViews();
         return true;
     }
@@ -1178,6 +1410,8 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
         const targetKeys = new Set();
         const results = [];
         for (const change of changes) {
+            if (change.action === "delete" || change.newTag === null)
+                continue;
             const key = (0, tag_utils_1.tagKey)(change.newTag, this.settings.caseSensitive);
             if (key === (0, tag_utils_1.tagKey)(change.oldTag, this.settings.caseSensitive))
                 continue;

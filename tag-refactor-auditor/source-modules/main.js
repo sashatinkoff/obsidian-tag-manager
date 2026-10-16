@@ -65,6 +65,10 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
             ignoredFolders: Array.isArray(loaded?.ignoredFolders)
                 ? loaded.ignoredFolders.filter((path) => typeof path === "string")
                 : [...constants_1.DEFAULT_SETTINGS.ignoredFolders],
+            createdDateProperty: typeof loaded?.createdDateProperty === "string"
+                ? loaded.createdDateProperty.trim()
+                : constants_1.DEFAULT_SETTINGS.createdDateProperty,
+            minTagMentions: (0, utils_1.clampNumber)(loaded?.minTagMentions, 0, 1000000, constants_1.DEFAULT_SETTINGS.minTagMentions),
         };
     }
     async saveSettings() {
@@ -148,7 +152,24 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
             new obsidian_1.Notice(`Тег #${oldTag} больше не найден. Обновите список тегов.`);
             return false;
         }
-        this.pendingChanges.set(oldKey, { oldTag: this.tagIndex.get(oldKey)?.tag ?? oldTag, newTag });
+        this.pendingChanges.set(oldKey, { oldTag: this.tagIndex.get(oldKey)?.tag ?? oldTag, newTag, action: "rename" });
+        this.refreshViews();
+        return true;
+    }
+    addDeleteTagChange(oldTagValue) {
+        const oldTag = (0, tag_utils_1.normalizeTag)(oldTagValue);
+        if (!oldTag) {
+            new obsidian_1.Notice("Не удалось определить тег для удаления.");
+            return false;
+        }
+        const oldKey = (0, tag_utils_1.tagKey)(oldTag, this.settings.caseSensitive);
+        const info = this.tagIndex.get(oldKey);
+        if (!info) {
+            new obsidian_1.Notice(`Тег #${oldTag} больше не найден. Обновите список тегов.`);
+            return false;
+        }
+        this.pendingChanges.set(oldKey, { oldTag: info.tag, newTag: null, action: "delete" });
+        new obsidian_1.Notice(`Удаление #${info.tag} добавлено в очередь.`);
         this.refreshViews();
         return true;
     }
@@ -164,6 +185,8 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
         const targetKeys = new Set();
         const results = [];
         for (const change of changes) {
+            if (change.action === "delete" || change.newTag === null)
+                continue;
             const key = (0, tag_utils_1.tagKey)(change.newTag, this.settings.caseSensitive);
             if (key === (0, tag_utils_1.tagKey)(change.oldTag, this.settings.caseSensitive))
                 continue;

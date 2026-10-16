@@ -278,17 +278,74 @@
   margin: 0 0 10px;
 }
 .tra-section-tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
-.tra-sort-select {
-  max-width: 205px;
-  min-width: 0;
-  height: 30px;
-  padding: 0 26px 0 8px;
-  border: 1px solid var(--tra-border);
-  border-radius: 9px;
-  color: var(--text-normal);
+.tra-tag-total {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 21px;
+  padding: 0 7px;
+  border-radius: 99px;
+  color: var(--tra-soft-text);
   background: var(--background-primary);
   font-size: 10px;
+  font-weight: 600;
+}
+.tra-sort-control {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin: -1px 0 12px;
+  min-width: 0;
+}
+.tra-sort-label {
+  color: var(--tra-soft-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+.tra-view .tra-sort-select {
+  appearance: auto;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--tra-border);
+  border-radius: 11px;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  font-size: 12px;
   box-shadow: none;
+}
+.tra-view .tra-sort-select:focus-visible {
+  outline: 2px solid var(--tra-accent-strong);
+  outline-offset: 2px;
+}
+.tra-mention-filter {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin: 0 0 12px;
+  min-width: 0;
+}
+.tra-view .tra-threshold-input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--tra-border);
+  border-radius: 11px;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  font-size: 12px;
+  box-shadow: none;
+}
+.tra-view .tra-threshold-input:focus-visible {
+  outline: 2px solid var(--tra-accent-strong);
+  outline-offset: 2px;
 }
 .tra-tag-list {
   display: flex;
@@ -375,7 +432,6 @@
   .tra-bento-grid { grid-template-columns: minmax(245px, 0.78fr) minmax(0, 1.22fr); gap: 12px; }
   .tra-tag-browser-card, .tra-view .tra-selected-card, .tra-view .tra-select-prompt, .tra-view .tra-queue-card { border-radius: 17px; }
   .tra-preview-list { grid-template-columns: 1fr; }
-  .tra-sort-select { max-width: 175px; }
 }
 @media (max-width: 760px) {
   .tra-view { padding: 14px 12px 20px; }
@@ -394,7 +450,81 @@
   .tra-stat-value { font-size: 18px; }
   .tra-section-heading { align-items: flex-start; flex-wrap: wrap; }
   .tra-section-tools { width: 100%; justify-content: space-between; }
-  .tra-sort-select { flex: 1; max-width: none; }
   .tra-preview-list { grid-template-columns: 1fr; }
 }
 
+
+/* Markdown-rendered note excerpts */
+.tra-excerpt.markdown-rendered {
+  max-height: 230px;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.tra-excerpt.markdown-rendered > :first-child { margin-top: 0; }
+.tra-excerpt.markdown-rendered > :last-child { margin-bottom: 0; }
+.tra-excerpt.markdown-rendered p,
+.tra-excerpt.markdown-rendered ul,
+.tra-excerpt.markdown-rendered ol,
+.tra-excerpt.markdown-rendered blockquote { margin-block: 0.35em; }
+.tra-excerpt.markdown-rendered h1,
+.tra-excerpt.markdown-rendered h2,
+.tra-excerpt.markdown-rendered h3,
+.tra-excerpt.markdown-rendered h4,
+.tra-excerpt.markdown-rendered h5,
+.tra-excerpt.markdown-rendered h6 {
+  font-size: 1.05em;
+  line-height: 1.35;
+  margin-block: 0.35em;
+}
+.tra-excerpt.markdown-rendered table { display: block; max-width: 100%; overflow-x: auto; }
+.tra-excerpt.markdown-rendered img,
+.tra-excerpt.markdown-rendered video { max-width: 100%; max-height: 140px; object-fit: contain; }
+.tra-excerpt.markdown-rendered pre { max-width: 100%; overflow: hidden; white-space: pre-wrap; }
+.tra-excerpt.markdown-rendered .internal-embed,
+.tra-excerpt.markdown-rendered .markdown-embed { display: none; }
+
+/* Destructive queue action: visually distinct but consistent with the active theme. */
+.tra-destructive-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px 10px;
+  margin-top: 10px;
+}
+.tra-destructive-actions small {
+  flex: 1 1 100%;
+  color: var(--tra-soft-text);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.tra-view .tra-danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid color-mix(in srgb, var(--color-red, #d65c68) 38%, var(--tra-border));
+  border-radius: 10px;
+  color: var(--color-red, #d65c68);
+  background: color-mix(in srgb, var(--color-red, #d65c68) 7%, var(--background-primary));
+  font-size: 11px;
+  font-weight: 650;
+}
+.tra-view .tra-danger-button:hover {
+  background: color-mix(in srgb, var(--color-red, #d65c68) 14%, var(--background-primary));
+}
+.tra-danger-button .tra-button-icon svg { width: 14px; height: 14px; }
+.tra-queue-delete, .tra-modal-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-red, #d65c68);
+  font-size: 11px;
+  font-weight: 650;
+}
+.tra-queue-delete svg, .tra-modal-delete svg { width: 13px; height: 13px; }

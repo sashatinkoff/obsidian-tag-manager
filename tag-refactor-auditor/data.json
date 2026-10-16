@@ -1,0 +1,9 @@
+{
+  "previewChars": 400,
+  "caseSensitive": false,
+  "ignoredFolders": [
+    "Templates"
+  ],
+  "createdDateProperty": "",
+  "minTagMentions": 100
+}
