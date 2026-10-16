@@ -1,6 +1,6 @@
 # Tag Refactor & Auditor — установка без npm
 
-![[img/dashboard.png]]
+![Вид «Карточки»](img/dashboard.png)
 
 ## Открытие в основном окне
 
