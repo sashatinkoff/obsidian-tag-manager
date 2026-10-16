@@ -25,7 +25,7 @@ class TagAuditorSettingTab extends obsidian_1.PluginSettingTab {
         }));
         new obsidian_1.Setting(containerEl)
             .setName("YAML-атрибут даты создания заметки")
-            .setDesc("Имя поля YAML, например created. Если поле указано, сортировка по дате использует его; заметки без корректной даты идут в конец. Если поле пустое, используется дата создания файла.")
+            .setDesc("Имя поля YAML, например created или Дата. Поддерживаются ISO, числовые даты и названия месяцев на разных языках (например, 12 октября 2012). Если поле указано, заметки без корректной даты идут в конец; если поле пустое, используется дата создания файла.")
             .addText((text) => text
             .setPlaceholder("created")
             .setValue(this.plugin.settings.createdDateProperty)

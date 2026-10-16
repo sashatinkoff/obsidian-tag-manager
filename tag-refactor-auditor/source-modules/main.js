@@ -173,6 +173,23 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
         this.refreshViews();
         return true;
     }
+    addUnmarkTagChange(oldTagValue) {
+        const oldTag = (0, tag_utils_1.normalizeTag)(oldTagValue);
+        if (!oldTag) {
+            new obsidian_1.Notice("Не удалось определить тег для снятия маркировки.");
+            return false;
+        }
+        const oldKey = (0, tag_utils_1.tagKey)(oldTag, this.settings.caseSensitive);
+        const info = this.tagIndex.get(oldKey);
+        if (!info) {
+            new obsidian_1.Notice(`Тег #${oldTag} больше не найден. Обновите список тегов.`);
+            return false;
+        }
+        this.pendingChanges.set(oldKey, { oldTag: info.tag, newTag: info.tag, action: "unmark" });
+        new obsidian_1.Notice(`Снятие маркировки #${info.tag} добавлено в очередь.`);
+        this.refreshViews();
+        return true;
+    }
     removeChange(oldTag) {
         this.pendingChanges.delete((0, tag_utils_1.tagKey)(oldTag, this.settings.caseSensitive));
         this.refreshViews();

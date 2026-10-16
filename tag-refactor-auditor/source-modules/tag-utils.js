@@ -46,11 +46,15 @@ function makeChangeMap(changes, caseSensitive) {
     const map = new Map();
     for (const change of changes) {
         const oldTag = normalizeTag(change.oldTag);
-        const isDelete = change.action === "delete" || change.newTag === null;
-        const newTag = isDelete ? null : normalizeTag(change.newTag);
-        if (!oldTag || (!isDelete && !newTag))
+        const action = change.action === "unmark"
+            ? "unmark"
+            : change.action === "delete" || change.newTag === null
+                ? "delete"
+                : "rename";
+        const newTag = action === "rename" ? normalizeTag(change.newTag) : null;
+        if (!oldTag || (action === "rename" && !newTag))
             continue;
-        map.set(tagKey(oldTag, caseSensitive), isDelete ? null : newTag);
+        map.set(tagKey(oldTag, caseSensitive), { action, newTag });
     }
     return map;
 }
@@ -105,9 +109,13 @@ function replaceBodyTags(body, changes, caseSensitive) {
                 const key = tagKey(rawOld, caseSensitive);
                 if (!changeMap.has(key))
                     return matched;
-                const replacement = changeMap.get(key);
+                const operation = changeMap.get(key);
                 changed = true;
-                return replacement === null ? "" : `#${replacement}`;
+                if (operation.action === "delete")
+                    return "";
+                if (operation.action === "unmark")
+                    return rawOld;
+                return `#${operation.newTag}`;
             });
         })
             .join("");
@@ -228,10 +236,13 @@ function replaceYamlScalar(raw, changes, caseSensitive) {
     const key = tagKey(normalized, caseSensitive);
     if (!changes.has(key))
         return raw;
-    const replacement = changes.get(key);
-    if (replacement === null)
+    const operation = changes.get(key);
+    // YAML `tags` / `tag` fields are metadata rather than visible text. Both a
+    // full delete and an unmark operation remove the matching metadata entry;
+    // unmark preserves the plain word in Markdown body text.
+    if (operation.action === "delete" || operation.action === "unmark")
         return null;
-    return `${leading}${encodeYamlScalar(replacement, decoded.quote)}${trailing}${suffix}`;
+    return `${leading}${encodeYamlScalar(operation.newTag, decoded.quote)}${trailing}${suffix}`;
 }
 function replaceYamlLineValue(line, colonIndex, changes, caseSensitive) {
     const prefix = line.slice(0, colonIndex + 1);
@@ -390,7 +401,7 @@ function replaceYamlTags(frontmatter, changes, caseSensitive) {
         return { text: frontmatter, changed: false };
     }
 }
-/** Apply all tag renames to one file without writing it. */
+/** Apply queued tag operations to one file without writing it. */
 function replaceTagsInMarkdown(content, changes, caseSensitive) {
     const frontmatterMatch = content.match(/^(\uFEFF?---\r?\n)([\s\S]*?)(\r?\n---\s*(?:\r?\n|$))/);
     if (!frontmatterMatch)

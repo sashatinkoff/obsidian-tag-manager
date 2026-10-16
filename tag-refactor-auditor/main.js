@@ -65,11 +65,15 @@ function makeChangeMap(changes, caseSensitive) {
     const map = new Map();
     for (const change of changes) {
         const oldTag = normalizeTag(change.oldTag);
-        const isDelete = change.action === "delete" || change.newTag === null;
-        const newTag = isDelete ? null : normalizeTag(change.newTag);
-        if (!oldTag || (!isDelete && !newTag))
+        const action = change.action === "unmark"
+            ? "unmark"
+            : change.action === "delete" || change.newTag === null
+                ? "delete"
+                : "rename";
+        const newTag = action === "rename" ? normalizeTag(change.newTag) : null;
+        if (!oldTag || (action === "rename" && !newTag))
             continue;
-        map.set(tagKey(oldTag, caseSensitive), isDelete ? null : newTag);
+        map.set(tagKey(oldTag, caseSensitive), { action, newTag });
     }
     return map;
 }
@@ -124,9 +128,13 @@ function replaceBodyTags(body, changes, caseSensitive) {
                 const key = tagKey(rawOld, caseSensitive);
                 if (!changeMap.has(key))
                     return matched;
-                const replacement = changeMap.get(key);
+                const operation = changeMap.get(key);
                 changed = true;
-                return replacement === null ? "" : `#${replacement}`;
+                if (operation.action === "delete")
+                    return "";
+                if (operation.action === "unmark")
+                    return rawOld;
+                return `#${operation.newTag}`;
             });
         })
             .join("");
@@ -247,10 +255,13 @@ function replaceYamlScalar(raw, changes, caseSensitive) {
     const key = tagKey(normalized, caseSensitive);
     if (!changes.has(key))
         return raw;
-    const replacement = changes.get(key);
-    if (replacement === null)
+    const operation = changes.get(key);
+    // YAML `tags` / `tag` fields are metadata rather than visible text. Both a
+    // full delete and an unmark operation remove the matching metadata entry;
+    // unmark preserves the plain word in Markdown body text.
+    if (operation.action === "delete" || operation.action === "unmark")
         return null;
-    return `${leading}${encodeYamlScalar(replacement, decoded.quote)}${trailing}${suffix}`;
+    return `${leading}${encodeYamlScalar(operation.newTag, decoded.quote)}${trailing}${suffix}`;
 }
 function replaceYamlLineValue(line, colonIndex, changes, caseSensitive) {
     const prefix = line.slice(0, colonIndex + 1);
@@ -409,7 +420,7 @@ function replaceYamlTags(frontmatter, changes, caseSensitive) {
         return { text: frontmatter, changed: false };
     }
 }
-/** Apply all tag renames to one file without writing it. */
+/** Apply queued tag operations to one file without writing it. */
 function replaceTagsInMarkdown(content, changes, caseSensitive) {
     const frontmatterMatch = content.match(/^(\uFEFF?---\r?\n)([\s\S]*?)(\r?\n---\s*(?:\r?\n|$))/);
     if (!frontmatterMatch)
@@ -563,12 +574,14 @@ class ApplyConfirmModal extends obsidian_1.Modal {
         const icon = contentEl.createDiv({ cls: "tra-modal-icon" });
         (0, obsidian_1.setIcon)(icon, "shield-check");
         contentEl.createEl("h2", { text: "Применить изменения?" });
-        const renameCount = this.changes.filter((change) => change.action !== "delete" && change.newTag !== null).length;
-        const deleteCount = this.changes.length - renameCount;
+        const renameCount = this.changes.filter((change) => change.action === "rename").length;
+        const deleteCount = this.changes.filter((change) => change.action === "delete" || change.newTag === null).length;
+        const unmarkCount = this.changes.filter((change) => change.action === "unmark").length;
         const actionSummary = [
             renameCount ? `${renameCount} ${(0, utils_1.pluralRu)(renameCount, "переименование", "переименования", "переименований")}` : "",
             deleteCount ? `${deleteCount} ${(0, utils_1.pluralRu)(deleteCount, "удаление тега", "удаления тега", "удалений тегов")}` : "",
-        ].filter(Boolean).join(" и ");
+            unmarkCount ? `${unmarkCount} ${(0, utils_1.pluralRu)(unmarkCount, "снятие маркировки", "снятия маркировки", "снятий маркировки")}` : "",
+        ].filter(Boolean).join(", ");
         contentEl.createEl("p", { text: `Будет обработано ${this.affectedCount} ${(0, utils_1.pluralRu)(this.affectedCount, "заметка", "заметки", "заметок")}. ${actionSummary ? `В очереди: ${actionSummary}.` : ""}` });
         const changes = contentEl.createDiv({ cls: "tra-modal-changes" });
         for (const change of this.changes) {
@@ -578,6 +591,11 @@ class ApplyConfirmModal extends obsidian_1.Modal {
                 const remove = row.createSpan({ cls: "tra-modal-delete" });
                 (0, obsidian_1.setIcon)(remove, "trash-2");
                 row.createSpan({ text: "Удалить тег" });
+            }
+            else if (change.action === "unmark") {
+                const unmark = row.createSpan({ cls: "tra-modal-unmark" });
+                (0, obsidian_1.setIcon)(unmark, "hash");
+                row.createSpan({ text: "Убрать #, оставить текст" });
             }
             else {
                 const arrow = row.createSpan({ cls: "tra-modal-arrow" });
@@ -691,7 +709,7 @@ class TagAuditorSettingTab extends obsidian_1.PluginSettingTab {
         }));
         new obsidian_1.Setting(containerEl)
             .setName("YAML-атрибут даты создания заметки")
-            .setDesc("Имя поля YAML, например created. Если поле указано, сортировка по дате использует его; заметки без корректной даты идут в конец. Если поле пустое, используется дата создания файла.")
+            .setDesc("Имя поля YAML, например created или Дата. Поддерживаются ISO, числовые даты и названия месяцев на разных языках (например, 12 октября 2012). Если поле указано, заметки без корректной даты идут в конец; если поле пустое, используется дата создания файла.")
             .addText((text) => text
             .setPlaceholder("created")
             .setValue(this.plugin.settings.createdDateProperty)
@@ -734,6 +752,51 @@ class TagAuditorSettingTab extends obsidian_1.PluginSettingTab {
 
 
 /* ===== view.js ===== */
+const DATE_MONTH_ALIASES = new Map();
+const DATE_MONTH_GROUPS = [
+    // January / Janvier / Enero / Gennaio and related forms.
+    ["january|jan|janvier|janv|enero|ene|janeiro|jane|gennaio|gen|januari|januar|ianuarie|styczeń|stycznia|stycz|leden|ledna|tammikuu|tammikuuta|январь|января|январе|янв|січень|січня|січ|студзень|студзеня|Ιανουάριος|Ιανουαρίου|يناير|มกราคม"],
+    ["february|feb|février|fevrier|févr|fevr|febrero|feb|fevereiro|fev|febbraio|feb|februari|februar|februarie|luty|lutego|lut|únor|unor|února|unora|helmikuu|helmikuuta|февраль|февраля|феврале|фев|лютий|лютого|лют|люты|лютага|Φεβρουάριος|Φεβρουαρίου|فبراير|กุมภาพันธ์"],
+    ["march|mar|mars|marzo|março|marco|maret|maart|märz|marz|marzec|marca|březen|brezen|března|brezna|maaliskuu|maaliskuuta|березень|березня|март|марта|марте|мар|сакавік|сакавіка|Μάρτιος|Μαρτίου|مارس|มีนาคม"],
+    ["april|apr|avril|avr|abril|abr|aprile|kwiecień|kwiecien|kwietnia|kwie|duben|dubna|huhtikuu|huhtikuuta|апрель|апреля|апреле|апр|квітень|квітня|красавік|красавіка|nisan|Απρίλιος|Απριλίου|أبريل|ابريل|เมษายน"],
+    ["may|mai|mayo|maio|maggio|mei|maj|maja|květen|kveten|května|kvetna|toukokuu|toukokuuta|травень|травня|май|мая|мае|mayıs|mayis|Μάιος|Μαΐου|مايو|พฤษภาคม"],
+    ["june|jun|juin|juin|junio|junho|giugno|giu|juni|czerwiec|czerwca|cze|červen|cerven|června|cervna|kesäkuu|kesäkuuta|червень|червня|июнь|июня|июне|июн|haziran|Ιούνιος|Ιουνίου|يونيو|มิถุนายน"],
+    ["july|jul|juillet|juil|julio|julho|luglio|lug|juli|lipiec|lipca|lip|červenec|cervenec|července|cervence|heinäkuu|heinäkuuta|липень|липня|июль|июля|июле|июл|temmuz|Ιούλιος|Ιουλίου|يوليو|กรกฎาคม"],
+    ["august|aug|août|aout|agosto|ag|augustus|augustus|sierpień|sierpien|sierpnia|sie|srpen|srpna|elokuu|elokuuta|серпень|серпня|август|августа|августе|авг|ağustos|agustos|Αύγουστος|Αυγούστου|أغسطس|اغسطس|สิงหาคม"],
+    ["september|sep|sept|septembre|septiembre|setiembre|set|setembro|settembre|wrzesień|wrzesien|września|wrzesnia|wrz|září|zari|syyskuu|syyskuuta|вересень|вересня|сентябрь|сентября|сентябре|сен|сент|eylül|eylul|Σεπτέμβριος|Σεπτεμβρίου|سبتمبر|กันยายน"],
+    ["october|oct|octobre|oct|octubre|outubro|out|ottobre|oktober|okt|październik|pazdziernik|października|pazdziernika|paź|paz|říjen|rijen|října|rijna|lokakuu|lokakuuta|жовтень|жовтня|октябрь|октября|октябре|окт|ekim|Οκτώβριος|Οκτωβρίου|أكتوبر|اكتوبر|ตุลาคม"],
+    ["november|nov|novembre|noviembre|novembro|nov|listopad|listopada|listopadu|lis|marraskuu|marraskuuta|листопад|листопада|ноябрь|ноября|ноябре|ноя|kasım|kasim|Νοέμβριος|Νοεμβρίου|نوفمبر|พฤศจิกายน"],
+    ["december|dec|décembre|decembre|diciembre|dezembro|dez|dicembre|dic|december|dezember|dez|grudzień|grudzien|grudnia|gru|prosinec|prosince|joulukuu|joulukuuta|грудень|грудня|декабрь|декабря|декабре|дек|aralık|aralik|Δεκέμβριος|Δεκεμβρίου|ديسمبر|ธันวาคม"],
+];
+function normalizeDateToken(value) {
+    return value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[.'’ʼ]/g, "").trim();
+}
+for (let monthIndex = 0; monthIndex < DATE_MONTH_GROUPS.length; monthIndex += 1) {
+    for (const alias of DATE_MONTH_GROUPS[monthIndex][0].split("|")) {
+        DATE_MONTH_ALIASES.set(normalizeDateToken(alias), monthIndex + 1);
+    }
+}
+const THAI_MONTH_ALIASES = new Set(["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"].map(normalizeDateToken));
+function normalizeLocalizedDigits(value) {
+    return value.replace(/[٠-٩۰-۹]/g, (digit) => {
+        const code = digit.codePointAt(0) ?? 0;
+        const base = code >= 0x06f0 && code <= 0x06f9 ? 0x06f0 : 0x0660;
+        return String(code - base);
+    }).replace(/[۰-۹]/g, (digit) => String((digit.codePointAt(0) ?? 0) - 0x06f0));
+}
+function toUtcDateTimestamp(year, month, day) {
+    if (!Number.isInteger(year) || year < 100 || year > 9999 || !Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(day) || day < 1 || day > 31)
+        return null;
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day)
+        return null;
+    return date.getTime();
+}
+function expandTwoDigitYear(year) {
+    if (year >= 100)
+        return year;
+    return year <= 49 ? 2000 + year : 1900 + year;
+}
 function parseCreationDate(value) {
     if (value instanceof Date)
         return Number.isFinite(value.getTime()) ? value.getTime() : 0;
@@ -742,8 +805,7 @@ function parseCreationDate(value) {
             return 0;
         if (Number.isInteger(value) && value >= 19000101 && value <= 29991231) {
             const raw = String(value);
-            const parsed = Date.parse(`${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}T00:00:00`);
-            return Number.isFinite(parsed) ? parsed : 0;
+            return toUtcDateTimestamp(Number(raw.slice(0, 4)), Number(raw.slice(4, 6)), Number(raw.slice(6, 8))) ?? 0;
         }
         if (Math.abs(value) >= 1000000000000)
             return value;
@@ -753,21 +815,102 @@ function parseCreationDate(value) {
     }
     if (typeof value !== "string")
         return 0;
-    const raw = value.trim();
+    let raw = normalizeLocalizedDigits(value).trim().replace(/[\u200e\u200f\u202a-\u202e]/g, "");
     if (!raw)
         return 0;
-    if (/^\d{13}$/.test(raw))
-        return Number(raw);
-    if (/^\d{10}$/.test(raw))
-        return Number(raw) * 1000;
-    const compact = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
-    if (compact) {
-        const parsed = Date.parse(`${compact[1]}-${compact[2]}-${compact[3]}T00:00:00`);
-        return Number.isFinite(parsed) ? parsed : 0;
+    raw = raw.replace(/^['"]|['"]$/g, "").trim();
+    // ISO date/timestamp: deterministic across machines and locales.
+    const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?=$|[Tt\s])/);
+    if (iso) {
+        const calendar = toUtcDateTimestamp(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+        if (calendar === null)
+            return 0;
+        const parsedTimestamp = Date.parse(raw);
+        return Number.isFinite(parsedTimestamp) ? parsedTimestamp : calendar;
     }
-    const parsed = Date.parse(raw);
-    return Number.isFinite(parsed) ? parsed : 0;
+    // Compact YYYYMMDD and year-first separated dates (YYYY/MM/DD, YYYY.MM.DD).
+    if (/^\d{8}$/.test(raw)) {
+        return toUtcDateTimestamp(Number(raw.slice(0, 4)), Number(raw.slice(4, 6)), Number(raw.slice(6, 8))) ?? 0;
+    }
+    const ymd = raw.match(/^(\d{4})[/.\-](\d{1,2})[/.\-](\d{1,2})(?=$|[Tt\s])/);
+    if (ymd) {
+        return toUtcDateTimestamp(Number(ymd[1]), Number(ymd[2]), Number(ymd[3])) ?? 0;
+    }
+    // East Asian year/month/day forms, such as 2012年10月12日 or 2012년 10월 12일.
+    const eastAsian = raw.match(/^\s*(\d{4})\s*(?:年|년)\s*(\d{1,2})\s*(?:月|월)\s*(\d{1,2})\s*(?:日|일)?/);
+    if (eastAsian) {
+        return toUtcDateTimestamp(Number(eastAsian[1]), Number(eastAsian[2]), Number(eastAsian[3])) ?? 0;
+    }
+    // Numeric dates: dotted/hyphenated forms default to day-first; slash forms
+    // default to month-first when both first components are <= 12 (common US style).
+    const numeric = raw.match(/^\s*(\d{1,2})\s*([/.\-])\s*(\d{1,2})\s*\2\s*(\d{2,4})(?=$|[\s,Tt])/);
+    if (numeric) {
+        const first = Number(numeric[1]);
+        const second = Number(numeric[3]);
+        const year = expandTwoDigitYear(Number(numeric[4]));
+        let month;
+        let day;
+        if (first > 12) {
+            day = first;
+            month = second;
+        }
+        else if (second > 12) {
+            month = first;
+            day = second;
+        }
+        else if (numeric[2] === "/") {
+            month = first;
+            day = second;
+        }
+        else {
+            day = first;
+            month = second;
+        }
+        return toUtcDateTimestamp(year, month, day) ?? 0;
+    }
+    // Textual month formats used across many locales: 12 октября 2012,
+    // October 12, 2012, 12 octobre 2012, 12 de outubro de 2012, etc.
+    // Drop a trailing time before extracting date components.
+    const datePart = raw.replace(/[T\s]+\d{1,2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:\s*(?:Z|[+-]\d{2}:?\d{2}))?\s*$/i, "").trim();
+    let month = 0;
+    let thaiCalendar = false;
+    for (const token of datePart.match(/[\p{L}\p{M}]+/gu) ?? []) {
+        const normalizedToken = normalizeDateToken(token);
+        const found = DATE_MONTH_ALIASES.get(normalizedToken);
+        if (found) {
+            month = found;
+            thaiCalendar = THAI_MONTH_ALIASES.has(normalizedToken);
+            break;
+        }
+    }
+    if (month) {
+        const numbers = [...datePart.matchAll(/\d{1,4}/g)].map((match) => ({ value: Number(match[0]), length: match[0].length }));
+        if (numbers.length >= 2) {
+            let yearEntry = numbers.find((item) => item.value >= 1000 && item.value <= 9999);
+            if (!yearEntry) {
+                const possibleYear = [...numbers].reverse().find((item) => item.length === 2 && item.value <= 99);
+                if (possibleYear)
+                    yearEntry = possibleYear;
+            }
+            if (yearEntry) {
+                let year = expandTwoDigitYear(yearEntry.value);
+                if (thaiCalendar && year >= 2400 && year <= 2700)
+                    year -= 543;
+                const dayEntry = numbers.find((item) => item !== yearEntry && item.value >= 1 && item.value <= 31);
+                if (dayEntry) {
+                    const parsed = toUtcDateTimestamp(year, month, dayEntry.value);
+                    return parsed ?? 0;
+                }
+            }
+        }
+        return 0;
+    }
+    // Final fallback supports RFC-style strings and other formats understood by
+    // the JavaScript engine; all common ambiguous formats above are handled first.
+    const fallback = Date.parse(raw);
+    return Number.isFinite(fallback) ? fallback : 0;
 }
+
 function getFrontmatterProperty(frontmatter, property) {
     if (!frontmatter || typeof frontmatter !== "object")
         return undefined;
@@ -785,6 +928,7 @@ class TagAuditorView extends obsidian_1.ItemView {
         this.selectedTag = null;
         this.query = "";
         this.showAllPreviews = false;
+        this.tagListScrollTop = 0;
         this.sortMode = "name";
         this.plugin = plugin;
     }
@@ -805,6 +949,11 @@ class TagAuditorView extends obsidian_1.ItemView {
     }
     render() {
         const root = this.contentEl;
+        // Keep the tag catalog at its current scroll position when selecting a tag
+        // causes the whole view to be rebuilt.
+        const previousTagList = root.querySelector(".tra-tag-list");
+        const previousTagListScrollTop = previousTagList?.scrollTop ?? this.tagListScrollTop ?? 0;
+        this.tagListScrollTop = previousTagListScrollTop;
         root.empty();
         root.addClass("tra-view");
         const shell = root.createDiv({ cls: "tra-shell" });
@@ -884,6 +1033,9 @@ class TagAuditorView extends obsidian_1.ItemView {
         const renderList = () => {
             tagTotal.setText(String(this.renderTagRows(list, search.value)));
         };
+        list.addEventListener("scroll", () => {
+            this.tagListScrollTop = list.scrollTop;
+        }, { passive: true });
         search.addEventListener("input", () => {
             this.query = search.value;
             renderList();
@@ -900,6 +1052,14 @@ class TagAuditorView extends obsidian_1.ItemView {
             void this.plugin.saveData(this.plugin.settings);
         });
         renderList();
+        // Restore after layout has been recalculated. The animation-frame restore
+        // avoids browsers resetting scrollTop while the new tag rows are measured.
+        list.scrollTop = previousTagListScrollTop;
+        window.requestAnimationFrame(() => {
+            if (list.isConnected) {
+                list.scrollTop = previousTagListScrollTop;
+            }
+        });
 
         // Bento layout: tag browser occupies the left column; preview and queue
         // are separate cards in the right column.
@@ -1026,8 +1186,16 @@ class TagAuditorView extends obsidian_1.ItemView {
         const deleteIcon = deleteButton.createSpan({ cls: "tra-button-icon" });
         (0, obsidian_1.setIcon)(deleteIcon, "trash-2");
         deleteButton.createSpan({ text: "Удалить тег из всех заметок" });
-        destructiveActions.createEl("small", { text: "Удаление затронет текст и YAML-фронтматтер." });
+        const unmarkButton = destructiveActions.createEl("button", {
+            cls: "tra-secondary-button tra-unmark-button",
+            attr: { type: "button", title: `Убрать # у #${info.tag}, сохранив текст` },
+        });
+        const unmarkIcon = unmarkButton.createSpan({ cls: "tra-button-icon" });
+        (0, obsidian_1.setIcon)(unmarkIcon, "hash");
+        unmarkButton.createSpan({ text: "Убрать #, оставить текст" });
+        destructiveActions.createEl("small", { text: "В тексте #тег станет обычным словом; запись из YAML tags/tag будет удалена из метаданных." });
         deleteButton.addEventListener("click", () => this.plugin.addDeleteTagChange(info.tag));
+        unmarkButton.addEventListener("click", () => this.plugin.addUnmarkTagChange(info.tag));
         const updateWarning = () => {
             const value = (0, tag_utils_1.cleanTagInput)(input.value);
             warning.empty();
@@ -1186,7 +1354,7 @@ class TagAuditorView extends obsidian_1.ItemView {
         if (changes.length === 0) {
             const empty = section.createDiv({ cls: "tra-queue-empty" });
             empty.createEl("span", { text: "Очередь пока пуста" });
-            empty.createEl("small", { text: "Выберите тег, чтобы переименовать его или удалить из заметок." });
+            empty.createEl("small", { text: "Выберите тег, чтобы переименовать его, удалить или снять маркировку #." });
             return;
         }
         const list = section.createDiv({ cls: "tra-queue-list" });
@@ -1199,9 +1367,14 @@ class TagAuditorView extends obsidian_1.ItemView {
                 (0, obsidian_1.setIcon)(deleteTarget.createSpan(), "trash-2");
                 deleteTarget.createSpan({ text: "Удалить тег" });
             }
+            else if (change.action === "unmark") {
+                const unmarkTarget = mapping.createDiv({ cls: "tra-queue-unmark" });
+                (0, obsidian_1.setIcon)(unmarkTarget.createSpan(), "hash");
+                unmarkTarget.createSpan({ text: "Убрать #" });
+            }
             else {
                 const arrow = mapping.createDiv({ cls: "tra-queue-arrow" });
-                (0, obsidian_1.setIcon)(arrow, "arrow-right");
+                (0, obsidian_1.setIcon)(arrow.createSpan(), "arrow-right");
                 mapping.createDiv({ cls: "tra-queue-new", text: `#${change.newTag}` });
             }
             const info = this.plugin.getTagInfo(change.oldTag);
@@ -1395,6 +1568,23 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
         }
         this.pendingChanges.set(oldKey, { oldTag: info.tag, newTag: null, action: "delete" });
         new obsidian_1.Notice(`Удаление #${info.tag} добавлено в очередь.`);
+        this.refreshViews();
+        return true;
+    }
+    addUnmarkTagChange(oldTagValue) {
+        const oldTag = (0, tag_utils_1.normalizeTag)(oldTagValue);
+        if (!oldTag) {
+            new obsidian_1.Notice("Не удалось определить тег для снятия маркировки.");
+            return false;
+        }
+        const oldKey = (0, tag_utils_1.tagKey)(oldTag, this.settings.caseSensitive);
+        const info = this.tagIndex.get(oldKey);
+        if (!info) {
+            new obsidian_1.Notice(`Тег #${oldTag} больше не найден. Обновите список тегов.`);
+            return false;
+        }
+        this.pendingChanges.set(oldKey, { oldTag: info.tag, newTag: info.tag, action: "unmark" });
+        new obsidian_1.Notice(`Снятие маркировки #${info.tag} добавлено в очередь.`);
         this.refreshViews();
         return true;
     }

@@ -14,12 +14,14 @@ class ApplyConfirmModal extends obsidian_1.Modal {
         const icon = contentEl.createDiv({ cls: "tra-modal-icon" });
         (0, obsidian_1.setIcon)(icon, "shield-check");
         contentEl.createEl("h2", { text: "Применить изменения?" });
-        const renameCount = this.changes.filter((change) => change.action !== "delete" && change.newTag !== null).length;
-        const deleteCount = this.changes.length - renameCount;
+        const renameCount = this.changes.filter((change) => change.action === "rename").length;
+        const deleteCount = this.changes.filter((change) => change.action === "delete" || change.newTag === null).length;
+        const unmarkCount = this.changes.filter((change) => change.action === "unmark").length;
         const actionSummary = [
             renameCount ? `${renameCount} ${(0, utils_1.pluralRu)(renameCount, "переименование", "переименования", "переименований")}` : "",
             deleteCount ? `${deleteCount} ${(0, utils_1.pluralRu)(deleteCount, "удаление тега", "удаления тега", "удалений тегов")}` : "",
-        ].filter(Boolean).join(" и ");
+            unmarkCount ? `${unmarkCount} ${(0, utils_1.pluralRu)(unmarkCount, "снятие маркировки", "снятия маркировки", "снятий маркировки")}` : "",
+        ].filter(Boolean).join(", ");
         contentEl.createEl("p", { text: `Будет обработано ${this.affectedCount} ${(0, utils_1.pluralRu)(this.affectedCount, "заметка", "заметки", "заметок")}. ${actionSummary ? `В очереди: ${actionSummary}.` : ""}` });
         const changes = contentEl.createDiv({ cls: "tra-modal-changes" });
         for (const change of this.changes) {
@@ -29,6 +31,11 @@ class ApplyConfirmModal extends obsidian_1.Modal {
                 const remove = row.createSpan({ cls: "tra-modal-delete" });
                 (0, obsidian_1.setIcon)(remove, "trash-2");
                 row.createSpan({ text: "Удалить тег" });
+            }
+            else if (change.action === "unmark") {
+                const unmark = row.createSpan({ cls: "tra-modal-unmark" });
+                (0, obsidian_1.setIcon)(unmark, "hash");
+                row.createSpan({ text: "Убрать #, оставить текст" });
             }
             else {
                 const arrow = row.createSpan({ cls: "tra-modal-arrow" });
