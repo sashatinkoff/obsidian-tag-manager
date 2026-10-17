@@ -74,7 +74,7 @@ function replaceBodyTags(body, changes, caseSensitive) {
     const flags = caseSensitive ? "gu" : "giu";
     // The lookbehind prevents matches embedded in another tag/word; the trailing
     // boundary avoids changing #tag inside #tagging or a nested #tag/child.
-    const tagPattern = new RegExp(`(?<![\\p{L}\\p{N}_/#-])#(?:${names.map(escapeRegExp).join("|")})(?![\\p{L}\\p{N}_/-])`, flags);
+    const tagPattern = new RegExp(`(?<!\\\\)(?<![\\p{L}\\p{N}_/#-])#(?:${names.map(escapeRegExp).join("|")})(?![\\p{L}\\p{N}_/-])`, flags);
     let changed = false;
     const lines = body.split(/(\r?\n)/);
     let fenceChar = null;
@@ -114,7 +114,7 @@ function replaceBodyTags(body, changes, caseSensitive) {
                 if (operation.action === "delete")
                     return "";
                 if (operation.action === "unmark")
-                    return rawOld;
+                    return `\\#${rawOld}`;
                 return `#${operation.newTag}`;
             });
         })
@@ -239,7 +239,7 @@ function replaceYamlScalar(raw, changes, caseSensitive) {
     const operation = changes.get(key);
     // YAML `tags` / `tag` fields are metadata rather than visible text. Both a
     // full delete and an unmark operation remove the matching metadata entry;
-    // unmark preserves the plain word in Markdown body text.
+    // unmark preserves the visible hash by escaping it with a Markdown backslash so Obsidian does not index it as a tag.
     if (operation.action === "delete" || operation.action === "unmark")
         return null;
     return `${leading}${encodeYamlScalar(operation.newTag, decoded.quote)}${trailing}${suffix}`;

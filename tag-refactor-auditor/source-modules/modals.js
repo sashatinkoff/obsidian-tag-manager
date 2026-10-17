@@ -35,7 +35,7 @@ class ApplyConfirmModal extends obsidian_1.Modal {
             else if (change.action === "unmark") {
                 const unmark = row.createSpan({ cls: "tra-modal-unmark" });
                 (0, obsidian_1.setIcon)(unmark, "hash");
-                row.createSpan({ text: "Убрать #, оставить текст" });
+                row.createSpan({ text: "Оставить # как обычный текст" });
             }
             else {
                 const arrow = row.createSpan({ cls: "tra-modal-arrow" });

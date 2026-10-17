@@ -234,9 +234,14 @@ class TagAuditorView extends obsidian_1.ItemView {
         (0, obsidian_1.setIcon)(searchIcon, "search");
         const search = searchWrap.createEl("input", {
             cls: "tra-search",
-            attr: { type: "search", placeholder: "Найти тег…", "aria-label": "Поиск тегов" },
+            attr: { type: "text", placeholder: "Найти тег…", "aria-label": "Поиск тегов" },
         });
         search.value = this.query;
+        const clearButton = searchWrap.createEl("button", {
+            cls: "tra-search-clear",
+            attr: { type: "button", "aria-label": "Очистить поиск", title: "Очистить поле поиска" },
+        });
+        (0, obsidian_1.setIcon)(clearButton, "x");
 
         const listHeader = tagBrowser.createDiv({ cls: "tra-section-heading" });
         listHeader.createEl("span", { text: "Теги" });
@@ -284,12 +289,23 @@ class TagAuditorView extends obsidian_1.ItemView {
         const renderList = () => {
             tagTotal.setText(String(this.renderTagRows(list, search.value)));
         };
+        const updateSearchClearButton = () => {
+            clearButton.style.display = search.value.length > 0 ? "flex" : "none";
+        };
         list.addEventListener("scroll", () => {
             this.tagListScrollTop = list.scrollTop;
         }, { passive: true });
         search.addEventListener("input", () => {
             this.query = search.value;
+            updateSearchClearButton();
             renderList();
+        });
+        clearButton.addEventListener("click", () => {
+            search.value = "";
+            this.query = "";
+            updateSearchClearButton();
+            renderList();
+            search.focus();
         });
         sortSelect.addEventListener("change", () => {
             this.sortMode = sortSelect.value;
@@ -302,6 +318,7 @@ class TagAuditorView extends obsidian_1.ItemView {
             renderList();
             void this.plugin.saveData(this.plugin.settings);
         });
+        updateSearchClearButton();
         renderList();
         // Restore after layout has been recalculated. The animation-frame restore
         // avoids browsers resetting scrollTop while the new tag rows are measured.
@@ -439,12 +456,12 @@ class TagAuditorView extends obsidian_1.ItemView {
         deleteButton.createSpan({ text: "Удалить тег из всех заметок" });
         const unmarkButton = destructiveActions.createEl("button", {
             cls: "tra-secondary-button tra-unmark-button",
-            attr: { type: "button", title: `Убрать # у #${info.tag}, сохранив текст` },
+            attr: { type: "button", title: `Сохранить # у #${info.tag} как обычный текст, не как тег` },
         });
         const unmarkIcon = unmarkButton.createSpan({ cls: "tra-button-icon" });
         (0, obsidian_1.setIcon)(unmarkIcon, "hash");
-        unmarkButton.createSpan({ text: "Убрать #, оставить текст" });
-        destructiveActions.createEl("small", { text: "В тексте #тег станет обычным словом; запись из YAML tags/tag будет удалена из метаданных." });
+        unmarkButton.createSpan({ text: "Оставить # как обычный текст" });
+        destructiveActions.createEl("small", { text: "В тексте #тег останется видимым, но # будет записан как HTML-сущность и не распознается как тег; запись из YAML tags/tag будет удалена из метаданных." });
         deleteButton.addEventListener("click", () => this.plugin.addDeleteTagChange(info.tag));
         unmarkButton.addEventListener("click", () => this.plugin.addUnmarkTagChange(info.tag));
         const updateWarning = () => {
@@ -621,7 +638,7 @@ class TagAuditorView extends obsidian_1.ItemView {
             else if (change.action === "unmark") {
                 const unmarkTarget = mapping.createDiv({ cls: "tra-queue-unmark" });
                 (0, obsidian_1.setIcon)(unmarkTarget.createSpan(), "hash");
-                unmarkTarget.createSpan({ text: "Убрать #" });
+                unmarkTarget.createSpan({ text: "Оставить # как текст" });
             }
             else {
                 const arrow = mapping.createDiv({ cls: "tra-queue-arrow" });

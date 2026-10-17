@@ -90,6 +90,42 @@
   padding: 0 12px 0 36px; color: var(--text-normal);
   background: var(--tra-surface); box-shadow: none;
 }
+/* Keep text clear of both the leading search icon and trailing clear button. */
+.tra-view .tra-search {
+  box-sizing: border-box;
+  padding-left: 40px;
+  padding-right: 38px;
+  text-indent: 0;
+}
+.tra-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--tra-soft-text);
+  box-shadow: none;
+  cursor: pointer;
+  z-index: 1;
+}
+.tra-search-clear:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.tra-search-clear svg { display: block; width: 14px; height: 14px; }
+.tra-search-clear:focus-visible {
+  outline: 2px solid var(--tra-accent-strong);
+  outline-offset: 1px;
+}
 .tra-search::placeholder { color: var(--tra-soft-text); }
 .tra-section-heading { display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 650; margin: 0 2px 8px; }
 .tra-muted { color: var(--tra-soft-text) !important; font-size: 11px !important; font-weight: 450 !important; }
