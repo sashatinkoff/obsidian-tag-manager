@@ -1,4 +1,4 @@
-# Tag Refactor & Auditor 1.0.10
+# Tag Refactor & Auditor 1.0.11
 
 Плагин Obsidian для поиска, предпросмотра, пакетного переименования и удаления тегов.
 
@@ -37,3 +37,8 @@
 ## Version 1.0.10
 
 The tag search field now has enough left/right padding to keep text clear of its icons and includes a dedicated clear (×) button. The unmark operation now writes a Markdown escape (`\#tag`) instead of an HTML entity, preserving the visible hash while preventing Obsidian from indexing the occurrence as a tag. The matching YAML `tag` / `tags` entry is still removed.
+
+
+## Version 1.0.11
+
+В карточку списка тегов добавлена буквенная навигация. Отображаются только буквы, с которых начинаются теги в текущем отфильтрованном списке; регистр не учитывается. Нажатие на букву плавно прокручивает список к первому тегу, начинающемуся с этой буквы.

@@ -1034,9 +1034,13 @@ class TagAuditorView extends obsidian_1.ItemView {
         mentionInput.value = String(this.plugin.settings.minTagMentions ?? 0);
         mentionLabel.setAttr("for", mentionInput.id = `tra-min-mentions-${Math.random().toString(36).slice(2, 9)}`);
 
+        const alphabetNav = tagBrowser.createDiv({
+            cls: "tra-alpha-nav",
+            attr: { "aria-label": "Переход к тегам по первой букве" },
+        });
         const list = tagBrowser.createDiv({ cls: "tra-tag-list" });
         const renderList = () => {
-            tagTotal.setText(String(this.renderTagRows(list, search.value)));
+            tagTotal.setText(String(this.renderTagRows(list, search.value, alphabetNav)));
         };
         const updateSearchClearButton = () => {
             clearButton.style.display = search.value.length > 0 ? "flex" : "none";
@@ -1108,7 +1112,7 @@ class TagAuditorView extends obsidian_1.ItemView {
         const frontmatter = this.plugin.app.metadataCache.getFileCache(file)?.frontmatter;
         return parseCreationDate(getFrontmatterProperty(frontmatter, property));
     }
-    renderTagRows(parent, query) {
+    renderTagRows(parent, query, alphabetNav) {
         parent.empty();
         const normalizedQuery = query.trim().replace(/^#/, "").toLocaleLowerCase();
         const configuredThreshold = Number(this.plugin.settings.minTagMentions ?? 0);
@@ -1131,6 +1135,42 @@ class TagAuditorView extends obsidian_1.ItemView {
                 return (latestTimes.get(b.key) ?? 0) - (latestTimes.get(a.key) ?? 0) || compareByName(a, b);
             return compareByName(a, b);
         });
+        // Build case-insensitive alphabet shortcuts from the currently visible tags.
+        // Only letters present in the filtered result set are shown.
+        alphabetNav.empty();
+        const initials = new Map();
+        for (const info of entries) {
+            const first = Array.from(info.tag.trim())[0];
+            if (!first || !/^\p{L}$/u.test(first))
+                continue;
+            const key = first.toLocaleLowerCase();
+            if (!initials.has(key))
+                initials.set(key, first.toLocaleUpperCase());
+        }
+        const orderedInitials = [...initials.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: "base" }));
+        for (const [key, label] of orderedInitials) {
+            const shortcut = alphabetNav.createEl("button", {
+                cls: "tra-alpha-button",
+                text: label,
+                attr: {
+                    type: "button",
+                    title: `Перейти к тегам на букву ${label}`,
+                    "aria-label": `Перейти к тегам на букву ${label}`,
+                },
+            });
+            shortcut.addEventListener("click", () => {
+                const target = Array.from(parent.querySelectorAll(".tra-tag-row"))
+                    .find((row) => row.getAttribute("data-tra-initial") === key);
+                if (!target)
+                    return;
+                const listRect = parent.getBoundingClientRect();
+                const targetRect = target.getBoundingClientRect();
+                const targetTop = parent.scrollTop + targetRect.top - listRect.top;
+                parent.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+            });
+        }
+        alphabetNav.style.display = orderedInitials.length > 0 ? "flex" : "none";
+
         if (entries.length === 0) {
             const empty = parent.createDiv({ cls: "tra-empty" });
             const icon = empty.createDiv({ cls: "tra-empty-icon" });
@@ -1146,6 +1186,9 @@ class TagAuditorView extends obsidian_1.ItemView {
                 cls: `tra-tag-row${isSelected ? " is-selected" : ""}${isPending ? " is-pending" : ""}`,
                 attr: { type: "button" },
             });
+            const first = Array.from(info.tag.trim())[0];
+            if (first && /^\p{L}$/u.test(first))
+                row.setAttr("data-tra-initial", first.toLocaleLowerCase());
             const hash = row.createSpan({ cls: "tra-tag-hash", text: "#" });
             hash.setAttr("aria-hidden", "true");
             row.createSpan({ cls: "tra-tag-name", text: info.tag });
