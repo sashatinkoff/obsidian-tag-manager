@@ -225,7 +225,7 @@ class TagAuditorView extends obsidian_1.ItemView {
         const overview = shell.createDiv({ cls: "tra-overview" });
         this.createStat(overview, "Теги", String(this.plugin.tagIndex.size), "hash");
         this.createStat(overview, "Заметки", String(this.plugin.app.vault.getMarkdownFiles().length), "files");
-        this.createStat(overview, "В очереди", String(this.plugin.pendingChanges.size), "git-pull-request");
+        this.createStat(overview, "В очереди", String(this.plugin.getPendingChanges().length), "git-pull-request");
 
         const workspace = shell.createDiv({ cls: "tra-bento-grid" });
         const tagBrowser = workspace.createDiv({ cls: "tra-tag-browser-card" });
@@ -432,7 +432,7 @@ class TagAuditorView extends obsidian_1.ItemView {
         }
         for (const info of entries) {
             const isSelected = this.selectedTag !== null && (0, tag_utils_1.tagKey)(this.selectedTag, this.plugin.settings.caseSensitive) === info.key;
-            const isPending = this.plugin.pendingChanges.has(info.key);
+            const isPending = this.plugin.pendingChanges.has(info.key) || this.plugin.pendingAdditions.has(info.key);
             const row = parent.createEl("button", {
                 cls: `tra-tag-row${isSelected ? " is-selected" : ""}${isPending ? " is-pending" : ""}`,
                 attr: { type: "button" },
@@ -489,6 +489,37 @@ class TagAuditorView extends obsidian_1.ItemView {
         const addButton = fieldRow.createEl("button", { cls: "tra-primary-button tra-add-button", text: "В очередь" });
         addButton.type = "button";
         const warning = form.createDiv({ cls: "tra-inline-warning" });
+        const addTagsSection = form.createDiv({ cls: "tra-add-tags-section" });
+        const addTagsLabel = addTagsSection.createEl("label", {
+            cls: "tra-field-label",
+            text: `Добавить несколько тегов к заметкам с #${info.tag}`,
+        });
+        const addTagsRow = addTagsSection.createDiv({ cls: "tra-add-tags-row" });
+        const addTagsInput = addTagsRow.createEl("textarea", {
+            cls: "tra-add-tags-input",
+            attr: {
+                rows: "2",
+                placeholder: "новый-тег1, новый-тег2",
+                autocomplete: "off",
+                spellcheck: "false",
+                "aria-label": "Список добавляемых тегов",
+            },
+        });
+        addTagsLabel.setAttr("for", addTagsInput.id = `tra-add-tags-${Math.random().toString(36).slice(2, 9)}`);
+        const addTagsButton = addTagsRow.createEl("button", {
+            cls: "tra-primary-button tra-add-tags-submit",
+            text: "Добавить в очередь",
+            attr: { type: "button" },
+        });
+        addTagsSection.createEl("small", {
+            cls: "tra-add-tags-help",
+            text: "Разделяйте теги пробелами, запятыми или переносами строк. В YAML список расширяется; для тегов в тексте новые теги добавляются в конце соответствующей записи перед разделителем ---.",
+        });
+        addTagsButton.addEventListener("click", () => {
+            if (this.plugin.addMultipleTagsChange(info.tag, addTagsInput.value)) {
+                addTagsInput.value = "";
+            }
+        });
         const destructiveActions = form.createDiv({ cls: "tra-destructive-actions" });
         const deleteButton = destructiveActions.createEl("button", {
             cls: "tra-danger-button",
@@ -504,7 +535,7 @@ class TagAuditorView extends obsidian_1.ItemView {
         const unmarkIcon = unmarkButton.createSpan({ cls: "tra-button-icon" });
         (0, obsidian_1.setIcon)(unmarkIcon, "hash");
         unmarkButton.createSpan({ text: "Оставить # как обычный текст" });
-        destructiveActions.createEl("small", { text: "В тексте #тег останется видимым, но # будет записан как HTML-сущность и не распознается как тег; запись из YAML tags/tag будет удалена из метаданных." });
+        destructiveActions.createEl("small", { text: "В тексте #тег останется видимым, но решётка будет экранирована обратным слешем (\\#тег), чтобы Obsidian не распознавал её как тег; запись из YAML tags/tag будет удалена из метаданных." });
         deleteButton.addEventListener("click", () => this.plugin.addDeleteTagChange(info.tag));
         unmarkButton.addEventListener("click", () => this.plugin.addUnmarkTagChange(info.tag));
         const updateWarning = () => {
@@ -665,7 +696,7 @@ class TagAuditorView extends obsidian_1.ItemView {
         if (changes.length === 0) {
             const empty = section.createDiv({ cls: "tra-queue-empty" });
             empty.createEl("span", { text: "Очередь пока пуста" });
-            empty.createEl("small", { text: "Выберите тег, чтобы переименовать его, удалить или снять маркировку #." });
+            empty.createEl("small", { text: "Выберите тег, чтобы переименовать, удалить, снять маркировку # или добавить связанные теги в заметки." });
             return;
         }
         const list = section.createDiv({ cls: "tra-queue-list" });
@@ -673,7 +704,12 @@ class TagAuditorView extends obsidian_1.ItemView {
             const row = list.createDiv({ cls: "tra-queue-row" });
             const mapping = row.createDiv({ cls: "tra-queue-mapping" });
             mapping.createDiv({ cls: "tra-queue-old", text: `#${change.oldTag}` });
-            if (change.action === "delete" || change.newTag === null) {
+            if (change.action === "add") {
+                const addTarget = mapping.createDiv({ cls: "tra-queue-add" });
+                (0, obsidian_1.setIcon)(addTarget.createSpan(), "plus");
+                addTarget.createSpan({ text: `Добавить ${change.addTags.map((tag) => `#${tag}`).join(" ")}` });
+            }
+            else if (change.action === "delete" || change.newTag === null) {
                 const deleteTarget = mapping.createDiv({ cls: "tra-queue-delete" });
                 (0, obsidian_1.setIcon)(deleteTarget.createSpan(), "trash-2");
                 deleteTarget.createSpan({ text: "Удалить тег" });
@@ -692,7 +728,7 @@ class TagAuditorView extends obsidian_1.ItemView {
             row.createDiv({ cls: "tra-queue-files", text: `${info?.files.length ?? 0} ${(0, utils_1.pluralRu)(info?.files.length ?? 0, "заметка", "заметки", "заметок")}` });
             const remove = row.createEl("button", { cls: "tra-remove-change", attr: { type: "button", title: "Убрать из очереди", "aria-label": `Убрать #${change.oldTag}` } });
             (0, obsidian_1.setIcon)(remove, "x");
-            remove.addEventListener("click", () => this.plugin.removeChange(change.oldTag));
+            remove.addEventListener("click", () => this.plugin.removeChange(change.oldTag, change.action));
         }
         const totalFiles = this.plugin.affectedFiles(changes).length;
         const footer = section.createDiv({ cls: "tra-queue-footer" });

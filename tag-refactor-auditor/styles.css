@@ -605,3 +605,67 @@
   font-weight: 650;
 }
 .tra-queue-delete svg, .tra-modal-delete svg { width: 13px; height: 13px; }
+
+/* Multi-tag additions: compact block matching the selected-tag form. */
+.tra-add-tags-section {
+  display: grid;
+  gap: 7px;
+  margin-top: 5px;
+  padding: 12px;
+  border: 1px solid var(--tra-border);
+  border-radius: 12px;
+  background: var(--background-secondary-alt, var(--background-secondary));
+}
+.tra-add-tags-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+.tra-add-tags-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 42px;
+  resize: vertical;
+  padding: 9px 10px;
+  border: 1px solid var(--tra-border);
+  border-radius: 9px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  box-shadow: none !important;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.tra-add-tags-input::placeholder { color: var(--tra-soft-text); }
+.tra-add-tags-submit {
+  align-self: stretch;
+  min-width: 112px;
+  white-space: normal;
+  padding-inline: 11px;
+}
+.tra-add-tags-help {
+  color: var(--tra-soft-text);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.tra-queue-add {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 5px;
+  color: var(--text-success, var(--color-green));
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.tra-queue-add svg { width: 13px; height: 13px; flex: 0 0 auto; }
+@media (max-width: 560px) {
+  .tra-add-tags-row { flex-direction: column; }
+  .tra-add-tags-submit { align-self: flex-start; }
+}
+.tra-modal-add {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-success, var(--color-green));
+  margin-right: 5px;
+}
+.tra-modal-add svg { width: 13px; height: 13px; }

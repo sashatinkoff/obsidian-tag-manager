@@ -401,17 +401,385 @@ function replaceYamlTags(frontmatter, changes, caseSensitive) {
         return { text: frontmatter, changed: false };
     }
 }
+function yamlTagValues(value) {
+    const values = Array.isArray(value) ? value : [value];
+    return values.filter((item) => typeof item === "string").map((item) => normalizeTag(item)).filter(Boolean);
+}
+function findYamlFieldContainingTag(frontmatter, sourceTag, caseSensitive) {
+    try {
+        const parsed = (0, obsidian_1.parseYaml)(frontmatter);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+            return null;
+        const sourceKey = tagKey(sourceTag, caseSensitive);
+        for (const field of ["tags", "tag"]) {
+            if (!Object.prototype.hasOwnProperty.call(parsed, field))
+                continue;
+            if (yamlTagValues(parsed[field]).some((value) => tagKey(value, caseSensitive) === sourceKey))
+                return { field, parsed };
+        }
+    }
+    catch {
+        return null;
+    }
+    return null;
+}
+function splitYamlComment(raw) {
+    let quote = null;
+    let escaped = false;
+    for (let i = 0; i < raw.length; i += 1) {
+        const char = raw[i];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (char === "\\" && quote === '"') {
+            escaped = true;
+            continue;
+        }
+        if (quote === "'") {
+            if (char === "'" && raw[i + 1] === "'") {
+                i += 1;
+                continue;
+            }
+            if (char === "'")
+                quote = null;
+            continue;
+        }
+        if (quote === '"') {
+            if (char === '"')
+                quote = null;
+            continue;
+        }
+        if (char === "'" || char === '"') {
+            quote = char;
+            continue;
+        }
+        if (char === "#" && (i === 0 || /\s/.test(raw[i - 1]))) {
+            return { value: raw.slice(0, i).trimEnd(), comment: raw.slice(i) };
+        }
+    }
+    return { value: raw.trimEnd(), comment: "" };
+}
+function createPendingTagPlaceholder(content, targetTag, context, caseSensitive, replacements, placeholderCache, reservedTokens) {
+    const cacheKey = `${context}:${tagKey(targetTag, caseSensitive)}`;
+    const cached = placeholderCache.get(cacheKey);
+    if (cached)
+        return cached;
+    let token = "";
+    do {
+        token = `tra_refactor_pending_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    } while (content.includes(token) || reservedTokens.has(token) || [...replacements.keys()].some((existing) => existing === token));
+    placeholderCache.set(cacheKey, token);
+    replacements.set(token, targetTag);
+    reservedTokens.add(token);
+    return token;
+}
+function addTagsToFrontmatter(frontmatter, field, newTags, caseSensitive, options) {
+    if (!newTags.length)
+        return { text: frontmatter, changed: false };
+    let parsed;
+    try {
+        parsed = (0, obsidian_1.parseYaml)(frontmatter);
+    }
+    catch {
+        return { text: frontmatter, changed: false };
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+        return { text: frontmatter, changed: false };
+    const existingAcrossFields = ["tags", "tag"].flatMap((key) => yamlTagValues(parsed[key]));
+    const existingKeys = new Set(existingAcrossFields.map((value) => tagKey(value, caseSensitive)));
+    for (const [placeholder, targetTag] of options.replacements) {
+        if (frontmatter.includes(placeholder))
+            existingKeys.add(tagKey(targetTag, caseSensitive));
+    }
+    const toAdd = [];
+    for (const targetTag of newTags) {
+        const key = tagKey(targetTag, caseSensitive);
+        if (existingKeys.has(key) || toAdd.some((item) => tagKey(item, caseSensitive) === key))
+            continue;
+        toAdd.push(targetTag);
+        existingKeys.add(key);
+    }
+    if (toAdd.length === 0)
+        return { text: frontmatter, changed: false };
+
+    const lines = frontmatter.split(/\r?\n/);
+    const propertyIndex = lines.findIndex((line) => new RegExp(`^${field}\\s*:`).test(line));
+    if (propertyIndex < 0)
+        return { text: frontmatter, changed: false };
+    const line = lines[propertyIndex];
+    const colonIndex = line.indexOf(":");
+    const prefix = line.slice(0, colonIndex + 1);
+    const rawValue = line.slice(colonIndex + 1);
+    const leading = rawValue.match(/^\s*/)?.[0] ?? "";
+    const trimmedValue = rawValue.slice(leading.length);
+    const placeholders = toAdd.map((targetTag) => createPendingTagPlaceholder(frontmatter, targetTag, "yaml", caseSensitive, options.replacements, options.placeholderCache, options.reservedTokens));
+
+    if (trimmedValue.startsWith("[")) {
+        const newline = frontmatter.includes("\r\n") ? "\r\n" : "\n";
+        const remainder = lines.slice(propertyIndex).join(newline);
+        const colon = remainder.indexOf(":");
+        const openingBracket = remainder.indexOf("[", colon + 1);
+        const relativeClosing = findFlowListClosing(remainder.slice(openingBracket));
+        if (openingBracket < 0 || relativeClosing < 0)
+            return { text: frontmatter, changed: false };
+        const closingBracket = openingBracket + relativeClosing;
+        const inner = remainder.slice(openingBracket + 1, closingBracket);
+        const quotedPlaceholders = placeholders.map((placeholder) => JSON.stringify(placeholder));
+        const trailingWhitespace = inner.match(/\s*$/)?.[0] ?? "";
+        let core = inner.slice(0, inner.length - trailingWhitespace.length);
+        if (core.trimEnd().endsWith(","))
+            core = core.trimEnd().slice(0, -1).trimEnd();
+        let nextInner;
+        if (inner.includes("\n")) {
+            const lastContentLine = core.split(/\r?\n/).reverse().find((candidate) => candidate.trim() !== "") ?? "";
+            const indent = lastContentLine.match(/^\s*/)?.[0] ?? " ".repeat((line.match(/^\s*/)?.[0].length ?? 0) + 2);
+            if (core.trim() === "")
+                nextInner = `${newline}${indent}${quotedPlaceholders.join(`,${newline}${indent}`)}${trailingWhitespace}`;
+            else
+                nextInner = `${core},${newline}${indent}${quotedPlaceholders.join(`,${newline}${indent}`)}${trailingWhitespace}`;
+        }
+        else {
+            nextInner = core.trim() === "" ? quotedPlaceholders.join(", ") : `${core}, ${quotedPlaceholders.join(", ")}`;
+        }
+        const updatedRemainder = `${remainder.slice(0, openingBracket + 1)}${nextInner}${remainder.slice(closingBracket)}`;
+        lines.splice(propertyIndex, lines.length - propertyIndex, ...updatedRemainder.split(newline));
+        return { text: lines.join(newline), changed: true };
+    }
+
+    if (Array.isArray(parsed[field])) {
+        const propertyIndent = line.match(/^\s*/)?.[0].length ?? 0;
+        let end = propertyIndex + 1;
+        let listIndent = propertyIndent + 2;
+        for (let i = propertyIndex + 1; i < lines.length; i += 1) {
+            const candidate = lines[i];
+            if (candidate.trim() === "") {
+                end = i + 1;
+                continue;
+            }
+            const indent = candidate.match(/^\s*/)?.[0].length ?? 0;
+            if (indent <= propertyIndent)
+                break;
+            const listItem = candidate.match(/^(\s*)-\s+/);
+            if (listItem)
+                listIndent = listItem[1].length;
+            end = i + 1;
+        }
+        // Append within this property's block, before the next top-level YAML key.
+        const newLines = placeholders.map((placeholder) => `${" ".repeat(listIndent)}- ${JSON.stringify(placeholder)}`);
+        lines.splice(end, 0, ...newLines);
+        return { text: lines.join(frontmatter.includes("\r\n") ? "\r\n" : "\n"), changed: true };
+    }
+
+    // A scalar `tag: one` / `tags: one` becomes a flow list without losing the
+    // original scalar quoting or an end-of-line YAML comment.
+    const separated = splitYamlComment(trimmedValue);
+    const decoded = decodeYamlScalar(separated.value.trim());
+    const original = encodeYamlScalar(decoded.value, decoded.quote);
+    lines[propertyIndex] = `${prefix}${leading}[${[original, ...placeholders.map((placeholder) => JSON.stringify(placeholder))].join(", ")}]${separated.comment ? ` ${separated.comment}` : ""}`;
+    return { text: lines.join(frontmatter.includes("\r\n") ? "\r\n" : "\n"), changed: true };
+}
+function makeTagPattern(tag, caseSensitive) {
+    const flags = caseSensitive ? "gu" : "giu";
+    return new RegExp(`(?<!\\\\)(?<![\\p{L}\\p{N}_/#-])#${escapeRegExp(tag)}(?![\\p{L}\\p{N}_/-])`, flags);
+}
+function containsActiveMarkdownTag(markdown, tag, caseSensitive) {
+    const pattern = makeTagPattern(tag, caseSensitive);
+    const lines = markdown.split(/(\r?\n)/);
+    let fenceChar = null;
+    let fenceLength = 0;
+    for (const line of lines) {
+        if (line === "\n" || line === "\r\n")
+            continue;
+        const fence = line.match(/^\s*(`{3,}|~{3,})/);
+        if (fence) {
+            const marker = fence[1];
+            if (fenceChar === null) {
+                fenceChar = marker[0];
+                fenceLength = marker.length;
+            }
+            else if (fenceChar === marker[0] && marker.length >= fenceLength) {
+                fenceChar = null;
+                fenceLength = 0;
+            }
+            continue;
+        }
+        if (fenceChar !== null)
+            continue;
+        const parts = line.split(/(`+[^`]*`+)/g);
+        for (let i = 0; i < parts.length; i += 1) {
+            if (i % 2 === 1 && /^`+/.test(parts[i]))
+                continue;
+            pattern.lastIndex = 0;
+            if (pattern.test(parts[i]))
+                return true;
+        }
+    }
+    return false;
+}
+function splitMarkdownPostSegments(body) {
+    const lineParts = body.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+    const result = [];
+    let segment = "";
+    let fenceChar = null;
+    let fenceLength = 0;
+    for (const line of lineParts) {
+        const lineWithoutEnding = line.replace(/\r?\n$/, "");
+        const fence = lineWithoutEnding.match(/^\s*(`{3,}|~{3,})/);
+        let isInsideFence = fenceChar !== null;
+        if (fence) {
+            if (fenceChar === null) {
+                fenceChar = fence[1][0];
+                fenceLength = fence[1].length;
+                isInsideFence = true;
+            }
+            else if (fenceChar === fence[1][0] && fence[1].length >= fenceLength) {
+                isInsideFence = true;
+                fenceChar = null;
+                fenceLength = 0;
+            }
+        }
+        const horizontalRule = !isInsideFence && /^\s{0,3}-{3,}[ \t]*$/.test(lineWithoutEnding);
+        if (horizontalRule) {
+            result.push({ type: "post", text: segment });
+            result.push({ type: "separator", text: line });
+            segment = "";
+        }
+        else {
+            segment += line;
+        }
+    }
+    result.push({ type: "post", text: segment });
+    return result;
+}
+function appendTagLineToPost(post, tagPlaceholders, newline) {
+    const trailingNewlines = post.match(/(?:\r?\n)*$/)?.[0] ?? "";
+    const content = post.slice(0, post.length - trailingNewlines.length);
+    if (content.length === 0)
+        return post;
+    return `${content}${newline}${tagPlaceholders.map((tag) => `#${tag}`).join(" ")}${trailingNewlines}`;
+}
+function addTagsToBodyPosts(body, sourceTag, newTags, caseSensitive, options) {
+    const newline = body.includes("\r\n") ? "\r\n" : "\n";
+    const segments = splitMarkdownPostSegments(body);
+    let changed = false;
+    let postIndex = -1;
+    for (const part of segments) {
+        if (part.type !== "post")
+            continue;
+        postIndex += 1;
+        if (!containsActiveMarkdownTag(part.text, sourceTag, caseSensitive))
+            continue;
+        const existingTags = new Set();
+        for (const targetTag of newTags) {
+            if (containsActiveMarkdownTag(part.text, targetTag, caseSensitive))
+                existingTags.add(tagKey(targetTag, caseSensitive));
+        }
+        const placeholders = [];
+        for (const targetTag of newTags) {
+            const key = tagKey(targetTag, caseSensitive);
+            if (existingTags.has(key))
+                continue;
+            const alreadyQueued = options.bodyAddedByPost.get(postIndex);
+            if (alreadyQueued?.has(key))
+                continue;
+            const placeholder = createPendingTagPlaceholder(body, targetTag, "body", caseSensitive, options.replacements, options.placeholderCache, options.reservedTokens);
+            placeholders.push(placeholder);
+            if (!options.bodyAddedByPost.has(postIndex))
+                options.bodyAddedByPost.set(postIndex, new Set());
+            options.bodyAddedByPost.get(postIndex).add(key);
+        }
+        if (placeholders.length > 0) {
+            part.text = appendTagLineToPost(part.text, placeholders, newline);
+            changed = true;
+        }
+    }
+    return { text: segments.map((part) => part.text).join(""), changed };
+}
+/**
+ * Add tags in the same place as the source tag: YAML tag metadata if the source
+ * exists there, otherwise in each Markdown post containing its inline mention.
+ * Placeholders shield the newly-added tags from other operations in the same batch.
+ */
+function addTagsToMarkdown(content, additionChanges, caseSensitive) {
+    let text = content;
+    let changed = false;
+    const replacements = new Map();
+    const placeholderCache = new Map();
+    const reservedTokens = new Set();
+    const bodyAddedByPost = new Map();
+    for (const change of additionChanges) {
+        const sourceTag = normalizeTag(change.oldTag);
+        const newTags = Array.isArray(change.addTags) ? change.addTags.map((value) => normalizeTag(value)).filter(Boolean) : [];
+        if (!sourceTag || newTags.length === 0)
+            continue;
+        for (const item of additionChanges) {
+            const oldTag = normalizeTag(item.oldTag);
+            const newTag = normalizeTag(item.newTag);
+            if (oldTag)
+                reservedTokens.add(oldTag);
+            if (newTag)
+                reservedTokens.add(newTag);
+            for (const addedTag of item.addTags ?? []) {
+                const normalized = normalizeTag(addedTag);
+                if (normalized)
+                    reservedTokens.add(normalized);
+            }
+        }
+        const frontmatterMatch = text.match(/^(\uFEFF?---\r?\n)([\s\S]*?)(\r?\n---\s*(?:\r?\n|$))/);
+        if (frontmatterMatch) {
+            const [whole, opening, frontmatter, closing] = frontmatterMatch;
+            const field = findYamlFieldContainingTag(frontmatter, sourceTag, caseSensitive);
+            if (field) {
+                const yaml = addTagsToFrontmatter(frontmatter, field.field, newTags, caseSensitive, {
+                    replacements,
+                    placeholderCache,
+                    reservedTokens,
+                });
+                if (yaml.changed) {
+                    text = `${opening}${yaml.text}${closing}${text.slice(whole.length)}`;
+                    changed = true;
+                }
+                // If the source tag is a YAML tag, never duplicate the addition in the body.
+                continue;
+            }
+        }
+        const currentFrontmatter = text.match(/^(\uFEFF?---\r?\n)([\s\S]*?)(\r?\n---\s*(?:\r?\n|$))/);
+        const body = currentFrontmatter ? text.slice(currentFrontmatter[0].length) : text;
+        const bodyResult = addTagsToBodyPosts(body, sourceTag, newTags, caseSensitive, {
+            replacements,
+            placeholderCache,
+            reservedTokens,
+            bodyAddedByPost,
+        });
+        if (bodyResult.changed) {
+            text = currentFrontmatter ? `${currentFrontmatter[0]}${bodyResult.text}` : bodyResult.text;
+            changed = true;
+        }
+    }
+    return { text, changed, replacements };
+}
 /** Apply queued tag operations to one file without writing it. */
 function replaceTagsInMarkdown(content, changes, caseSensitive) {
-    const frontmatterMatch = content.match(/^(\uFEFF?---\r?\n)([\s\S]*?)(\r?\n---\s*(?:\r?\n|$))/);
-    if (!frontmatterMatch)
-        return replaceBodyTags(content, changes, caseSensitive);
-    const [whole, opening, frontmatter, closing] = frontmatterMatch;
-    const afterFrontmatter = content.slice(whole.length);
-    const yaml = replaceYamlTags(frontmatter, changes, caseSensitive);
-    const body = replaceBodyTags(afterFrontmatter, changes, caseSensitive);
-    const next = `${opening}${yaml.text}${closing}${body.text}`;
-    return { text: next, changed: yaml.changed || body.changed };
+    const additions = changes.filter((change) => change.action === "add");
+    const mutations = changes.filter((change) => change.action !== "add");
+    const added = addTagsToMarkdown(content, additions, caseSensitive);
+    const frontmatterMatch = added.text.match(/^(\uFEFF?---\r?\n)([\s\S]*?)(\r?\n---\s*(?:\r?\n|$))/);
+    let replaced;
+    if (!frontmatterMatch) {
+        replaced = replaceBodyTags(added.text, mutations, caseSensitive);
+    }
+    else {
+        const [whole, opening, frontmatter, closing] = frontmatterMatch;
+        const afterFrontmatter = added.text.slice(whole.length);
+        const yaml = replaceYamlTags(frontmatter, mutations, caseSensitive);
+        const body = replaceBodyTags(afterFrontmatter, mutations, caseSensitive);
+        replaced = { text: `${opening}${yaml.text}${closing}${body.text}`, changed: yaml.changed || body.changed };
+    }
+    let resolvedText = replaced.text;
+    for (const [placeholder, targetTag] of added.replacements)
+        resolvedText = resolvedText.split(placeholder).join(targetTag);
+    return { text: resolvedText, changed: added.changed || replaced.changed };
 }
 function findInlineTagIndex(content, tag, caseSensitive) {
     const escaped = escapeRegExp(normalizeTag(tag) ?? tag);
@@ -421,4 +789,4 @@ function findInlineTagIndex(content, tag, caseSensitive) {
     return match?.index ?? -1;
 }
 
-export { normalizeTag, tagKey, isValidTag, cleanTagInput, collectFrontmatterTags, replaceTagsInMarkdown, findInlineTagIndex };
+export { normalizeTag, tagKey, isValidTag, cleanTagInput, collectFrontmatterTags, replaceTagsInMarkdown, findInlineTagIndex, addTagsToMarkdown };

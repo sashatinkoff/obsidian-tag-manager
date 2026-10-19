@@ -15,19 +15,26 @@ class ApplyConfirmModal extends obsidian_1.Modal {
         (0, obsidian_1.setIcon)(icon, "shield-check");
         contentEl.createEl("h2", { text: "Применить изменения?" });
         const renameCount = this.changes.filter((change) => change.action === "rename").length;
-        const deleteCount = this.changes.filter((change) => change.action === "delete" || change.newTag === null).length;
+        const deleteCount = this.changes.filter((change) => change.action === "delete" || (change.newTag === null && change.action !== "add")).length;
         const unmarkCount = this.changes.filter((change) => change.action === "unmark").length;
+        const addCount = this.changes.filter((change) => change.action === "add").length;
         const actionSummary = [
             renameCount ? `${renameCount} ${(0, utils_1.pluralRu)(renameCount, "переименование", "переименования", "переименований")}` : "",
             deleteCount ? `${deleteCount} ${(0, utils_1.pluralRu)(deleteCount, "удаление тега", "удаления тега", "удалений тегов")}` : "",
             unmarkCount ? `${unmarkCount} ${(0, utils_1.pluralRu)(unmarkCount, "снятие маркировки", "снятия маркировки", "снятий маркировки")}` : "",
+            addCount ? `${addCount} ${(0, utils_1.pluralRu)(addCount, "пакет добавления тегов", "пакета добавления тегов", "пакетов добавления тегов")}` : "",
         ].filter(Boolean).join(", ");
         contentEl.createEl("p", { text: `Будет обработано ${this.affectedCount} ${(0, utils_1.pluralRu)(this.affectedCount, "заметка", "заметки", "заметок")}. ${actionSummary ? `В очереди: ${actionSummary}.` : ""}` });
         const changes = contentEl.createDiv({ cls: "tra-modal-changes" });
         for (const change of this.changes) {
             const row = changes.createDiv({ cls: "tra-modal-change" });
             row.createSpan({ text: `#${change.oldTag}` });
-            if (change.action === "delete" || change.newTag === null) {
+            if (change.action === "add") {
+                const add = row.createSpan({ cls: "tra-modal-add" });
+                (0, obsidian_1.setIcon)(add, "plus");
+                row.createSpan({ text: `Добавить ${change.addTags.map((tag) => `#${tag}`).join(" ")}` });
+            }
+            else if (change.action === "delete" || change.newTag === null) {
                 const remove = row.createSpan({ cls: "tra-modal-delete" });
                 (0, obsidian_1.setIcon)(remove, "trash-2");
                 row.createSpan({ text: "Удалить тег" });

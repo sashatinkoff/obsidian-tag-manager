@@ -12,6 +12,7 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
         this.settings = { ...constants_1.DEFAULT_SETTINGS };
         this.tagIndex = new Map();
         this.pendingChanges = new Map();
+        this.pendingAdditions = new Map();
         this.lastUndo = new Map();
         this.lastUndoLabel = "";
         this.isScanning = false;
@@ -127,7 +128,7 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
         return this.tagIndex.get((0, tag_utils_1.tagKey)(tag, this.settings.caseSensitive));
     }
     getPendingChanges() {
-        return [...this.pendingChanges.values()];
+        return [...this.pendingChanges.values(), ...this.pendingAdditions.values()];
     }
     affectedFiles(changes = this.getPendingChanges()) {
         return (0, scanner_1.filesAffectedByTags)(this.tagIndex, changes.map((change) => change.oldTag), this.settings.caseSensitive);
@@ -153,6 +154,53 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
             return false;
         }
         this.pendingChanges.set(oldKey, { oldTag: this.tagIndex.get(oldKey)?.tag ?? oldTag, newTag, action: "rename" });
+        this.refreshViews();
+        return true;
+    }
+    addMultipleTagsChange(sourceTagValue, rawTagsValue) {
+        const sourceTag = (0, tag_utils_1.normalizeTag)(sourceTagValue);
+        const rawTags = typeof rawTagsValue === "string" ? rawTagsValue : "";
+        const requestedTags = rawTags.split(/[\s,;]+/).map((value) => (0, tag_utils_1.cleanTagInput)(value)).filter(Boolean);
+        if (!sourceTag || requestedTags.length === 0) {
+            new obsidian_1.Notice("Укажите один или несколько новых тегов.");
+            return false;
+        }
+        const oldKey = (0, tag_utils_1.tagKey)(sourceTag, this.settings.caseSensitive);
+        const info = this.tagIndex.get(oldKey);
+        if (!info) {
+            new obsidian_1.Notice(`Тег #${sourceTag} больше не найден. Обновите список тегов.`);
+            return false;
+        }
+        const existingPending = this.pendingAdditions.get(oldKey)?.addTags ?? [];
+        const allTags = [...existingPending];
+        const seen = new Set(allTags.map((tag) => (0, tag_utils_1.tagKey)(tag, this.settings.caseSensitive)));
+        for (const tagValue of requestedTags) {
+            const tag = (0, tag_utils_1.normalizeTag)(tagValue);
+            if (!tag || !(0, tag_utils_1.isValidTag)(tag)) {
+                new obsidian_1.Notice(`Некорректное имя тега: ${tagValue}. Используйте буквы, цифры, \`_\`, \`-\` и \`/\` для вложенности.`);
+                return false;
+            }
+            const key = (0, tag_utils_1.tagKey)(tag, this.settings.caseSensitive);
+            if (key === oldKey) {
+                new obsidian_1.Notice(`Тег #${tag} уже выбран как исходный; его не нужно добавлять повторно.`);
+                continue;
+            }
+            if (seen.has(key))
+                continue;
+            seen.add(key);
+            allTags.push(tag);
+        }
+        if (allTags.length === existingPending.length) {
+            new obsidian_1.Notice("Все указанные теги уже есть в очереди или совпадают с исходным тегом.");
+            return false;
+        }
+        this.pendingAdditions.set(oldKey, {
+            oldTag: info.tag,
+            newTag: null,
+            action: "add",
+            addTags: allTags,
+        });
+        new obsidian_1.Notice(`Добавление тегов к заметкам с #${info.tag} добавлено в очередь.`);
         this.refreshViews();
         return true;
     }
@@ -190,12 +238,20 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
         this.refreshViews();
         return true;
     }
-    removeChange(oldTag) {
-        this.pendingChanges.delete((0, tag_utils_1.tagKey)(oldTag, this.settings.caseSensitive));
+    removeChange(oldTag, action) {
+        const key = (0, tag_utils_1.tagKey)(oldTag, this.settings.caseSensitive);
+        if (!action || action === "add")
+            this.pendingAdditions.delete(key);
+        if (!action || action !== "add") {
+            const existing = this.pendingChanges.get(key);
+            if (!action || !existing || existing.action === action)
+                this.pendingChanges.delete(key);
+        }
         this.refreshViews();
     }
     clearChanges() {
         this.pendingChanges.clear();
+        this.pendingAdditions.clear();
         this.refreshViews();
     }
     existingMergeTargets(changes = this.getPendingChanges()) {
@@ -254,8 +310,10 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
             this.lastUndo = undoEntries;
             this.lastUndoLabel = new Date().toLocaleString();
         }
-        if (report.errors.length === 0)
+        if (report.errors.length === 0) {
             this.pendingChanges.clear();
+            this.pendingAdditions.clear();
+        }
         await this.scanTags();
         new modals_1.BatchReportModal(this.app, this, report).open();
         return report;
