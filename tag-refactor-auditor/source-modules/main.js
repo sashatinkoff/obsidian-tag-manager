@@ -339,7 +339,7 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
                         const inlineSourceTags = (cache?.tags ?? [])
                             .map((tag) => (0, tag_utils_1.normalizeTag)(tag.tag))
                             .filter((tag) => Boolean(tag));
-                        result = (0, tag_utils_1.addTagsToMarkdownDocument)(currentContent, payload.tags, this.settings.caseSensitive, inlineSourceTags);
+                        result = (0, tag_utils_1.addTagsToMarkdownDocument)(currentContent, payload.tags, this.settings.caseSensitive, inlineSourceTags, payload.alwaysYaml === true);
                     }
                     else {
                         result = (0, tag_utils_1.replaceTagsInMarkdown)(currentContent, payload.changes, this.settings.caseSensitive);

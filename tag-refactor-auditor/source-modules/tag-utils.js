@@ -763,9 +763,10 @@ function addTagsToMarkdown(content, additionChanges, caseSensitive) {
  * Add tags to a selected note, independent of a source tag.
  * Existing YAML tag fields are extended in-place. Otherwise tags are added to each
  * Markdown post containing inline tags; if the note has no inline tags, they are
- * appended to its final post. Fenced and inline code are ignored when locating posts.
+ * appended to its final post. When forceYaml is true, a YAML tags property is created
+ * when needed and all requested tags are stored in the frontmatter.
  */
-function addTagsToMarkdownDocument(content, requestedTags, caseSensitive, inlineSourceTags = []) {
+function addTagsToMarkdownDocument(content, requestedTags, caseSensitive, inlineSourceTags = [], forceYaml = false) {
     const newTags = [];
     const seen = new Set();
     for (const value of requestedTags) {
@@ -791,6 +792,8 @@ function addTagsToMarkdownDocument(content, requestedTags, caseSensitive, inline
         catch {
             parsed = null;
         }
+        if (frontmatter.trim() === "")
+            parsed = {};
         let field = null;
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
             if (Object.prototype.hasOwnProperty.call(parsed, "tags"))
@@ -813,6 +816,24 @@ function addTagsToMarkdownDocument(content, requestedTags, caseSensitive, inline
             }
             return { text: content, changed: false };
         }
+        if (forceYaml && parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            const newline = content.includes("\r\n") ? "\r\n" : "\n";
+            const tagLines = newTags.map((tag) => `  - ${JSON.stringify(tag)}`).join(newline);
+            const updatedFrontmatter = frontmatter.length > 0
+                ? `${frontmatter}${newline}tags:${newline}${tagLines}`
+                : `tags:${newline}${tagLines}`;
+            const resolved = `${opening}${updatedFrontmatter}${closing}${content.slice(frontmatterMatch[0].length)}`;
+            return { text: resolved, changed: resolved !== content };
+        }
+    }
+
+    if (forceYaml && !frontmatterMatch) {
+        const newline = content.includes("\r\n") ? "\r\n" : "\n";
+        const bom = content.startsWith("\uFEFF") ? "\uFEFF" : "";
+        const body = bom ? content.slice(1) : content;
+        const tagLines = newTags.map((tag) => `  - ${JSON.stringify(tag)}`).join(newline);
+        const frontmatter = `${bom}---${newline}tags:${newline}${tagLines}${newline}---${newline}`;
+        return { text: `${frontmatter}${body}`, changed: true };
     }
 
     const newline = content.includes("\r\n") ? "\r\n" : "\n";

@@ -935,3 +935,14 @@
 .tra-bulk-any-tags { display: flex; align-items: center; gap: 8px; width: fit-content; color: var(--text-normal); font-size: 11px; cursor: pointer; }
 .tra-bulk-any-tags input { margin: 0; }
 .tra-bulk-tag-filter-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+
+/* v1.0.19: bulk date sorting and YAML tag option */
+.tra-bulk-results-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.tra-view .tra-bulk-sort-select { width: auto; max-width: 155px; min-height: 30px; padding: 5px 8px; flex: 0 1 auto; font-size: 11px; }
+.tra-bulk-always-yaml { display: flex; align-items: center; gap: 8px; width: fit-content; margin-top: 10px; color: var(--text-normal); font-size: 11px; line-height: 1.4; cursor: pointer; }
+.tra-bulk-always-yaml input { flex: 0 0 auto; margin: 0; }
+@media (max-width: 500px) {
+  .tra-bulk-results-header { flex-wrap: wrap; }
+  .tra-bulk-results-actions { margin-left: auto; }
+  .tra-view .tra-bulk-sort-select { max-width: 135px; }
+}
