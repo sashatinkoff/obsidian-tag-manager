@@ -318,6 +318,55 @@ class TagRefactorAuditorPlugin extends obsidian_1.Plugin {
         new modals_1.BatchReportModal(this.app, this, report).open();
         return report;
     }
+    async applyBulkTagOperation(files, payload) {
+        const report = {
+            requestedChanges: payload.kind === "add" ? payload.tags.length : payload.changes.length,
+            updatedFiles: 0,
+            unchangedFiles: 0,
+            errors: [],
+            mergedTargets: [],
+        };
+        const undoEntries = new Map();
+        for (const file of files) {
+            let before = "";
+            let after = "";
+            try {
+                await this.app.vault.process(file, (currentContent) => {
+                    before = currentContent;
+                    let result;
+                    if (payload.kind === "add") {
+                        const cache = this.app.metadataCache.getFileCache(file);
+                        const inlineSourceTags = (cache?.tags ?? [])
+                            .map((tag) => (0, tag_utils_1.normalizeTag)(tag.tag))
+                            .filter((tag) => Boolean(tag));
+                        result = (0, tag_utils_1.addTagsToMarkdownDocument)(currentContent, payload.tags, this.settings.caseSensitive, inlineSourceTags);
+                    }
+                    else {
+                        result = (0, tag_utils_1.replaceTagsInMarkdown)(currentContent, payload.changes, this.settings.caseSensitive);
+                    }
+                    after = result.text;
+                    return result.text;
+                });
+                if (after !== before) {
+                    report.updatedFiles += 1;
+                    undoEntries.set(file.path, { before, after });
+                }
+                else {
+                    report.unchangedFiles += 1;
+                }
+            }
+            catch (error) {
+                report.errors.push(`${file.path}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+        if (undoEntries.size > 0) {
+            this.lastUndo = undoEntries;
+            this.lastUndoLabel = new Date().toLocaleString();
+        }
+        await this.scanTags();
+        new modals_1.BatchReportModal(this.app, this, report).open();
+        return report;
+    }
     async undoLastBatch() {
         if (this.lastUndo.size === 0) {
             new obsidian_1.Notice("Нет операции, которую можно отменить.");

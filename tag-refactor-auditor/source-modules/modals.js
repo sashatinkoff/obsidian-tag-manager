@@ -80,6 +80,53 @@ class ApplyConfirmModal extends obsidian_1.Modal {
         this.contentEl.empty();
     }
 }
+class BulkApplyConfirmModal extends obsidian_1.Modal {
+    constructor(app, fileCount, operationTitle, operationDetails, isDestructive, onConfirm) {
+        super(app);
+        this.fileCount = fileCount;
+        this.operationTitle = operationTitle;
+        this.operationDetails = operationDetails;
+        this.isDestructive = isDestructive;
+        this.onConfirm = onConfirm;
+    }
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.addClass("tra-modal");
+        const icon = contentEl.createDiv({ cls: "tra-modal-icon" });
+        (0, obsidian_1.setIcon)(icon, this.isDestructive ? "alert-triangle" : "layers");
+        contentEl.createEl("h2", { text: "Применить массовые изменения?" });
+        contentEl.createEl("p", { text: `Будет обработано ${this.fileCount} ${(0, utils_1.pluralRu)(this.fileCount, "выбранная заметка", "выбранные заметки", "выбранных заметок")}.` });
+        const summary = contentEl.createDiv({ cls: "tra-bulk-confirm-summary" });
+        summary.createEl("strong", { text: this.operationTitle });
+        summary.createEl("p", { text: this.operationDetails });
+        if (this.isDestructive) {
+            const warning = contentEl.createDiv({ cls: "tra-modal-warning" });
+            (0, obsidian_1.setIcon)(warning.createDiv(), "alert-triangle");
+            warning.createDiv({ text: "Будут изменены только выбранные заметки. После применения можно отменить пакет, если файлы не изменились повторно." });
+        }
+        const actions = contentEl.createDiv({ cls: "tra-modal-actions" });
+        const cancel = actions.createEl("button", { cls: "tra-secondary-button", text: "Отмена", attr: { type: "button" } });
+        cancel.addEventListener("click", () => this.close());
+        const confirm = actions.createEl("button", { cls: "tra-primary-button", text: "Применить", attr: { type: "button" } });
+        confirm.addEventListener("click", async () => {
+            confirm.disabled = true;
+            confirm.setText("Обработка…");
+            try {
+                await this.onConfirm();
+                this.close();
+            }
+            catch (error) {
+                new obsidian_1.Notice(`Не удалось применить массовые изменения: ${error instanceof Error ? error.message : String(error)}`, 8000);
+                confirm.disabled = false;
+                confirm.setText("Повторить");
+            }
+        });
+    }
+    onClose() {
+        this.contentEl.empty();
+    }
+}
+
 class BatchReportModal extends obsidian_1.Modal {
     constructor(app, plugin, report, isUndoReport = false) {
         super(app);
@@ -129,4 +176,4 @@ class BatchReportModal extends obsidian_1.Modal {
     }
 }
 
-export { ApplyConfirmModal, BatchReportModal };
+export { ApplyConfirmModal, BatchReportModal, BulkApplyConfirmModal };

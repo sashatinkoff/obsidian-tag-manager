@@ -1,7 +1,7 @@
 {
   "id": "tag-refactor-auditor",
   "name": "Tag Refactor & Auditor",
-  "version": "1.0.12",
+  "version": "1.0.18",
   "minAppVersion": "1.5.0",
   "description": "Audit, preview, batch-rename, delete, unmark, or add tags across your Obsidian vault.",
   "author": "OpenAI",

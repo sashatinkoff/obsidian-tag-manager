@@ -759,6 +759,122 @@ function addTagsToMarkdown(content, additionChanges, caseSensitive) {
     }
     return { text, changed, replacements };
 }
+/**
+ * Add tags to a selected note, independent of a source tag.
+ * Existing YAML tag fields are extended in-place. Otherwise tags are added to each
+ * Markdown post containing inline tags; if the note has no inline tags, they are
+ * appended to its final post. Fenced and inline code are ignored when locating posts.
+ */
+function addTagsToMarkdownDocument(content, requestedTags, caseSensitive, inlineSourceTags = []) {
+    const newTags = [];
+    const seen = new Set();
+    for (const value of requestedTags) {
+        const tag = normalizeTag(value);
+        if (!tag || !isValidTag(tag))
+            continue;
+        const key = tagKey(tag, caseSensitive);
+        if (seen.has(key))
+            continue;
+        seen.add(key);
+        newTags.push(tag);
+    }
+    if (newTags.length === 0)
+        return { text: content, changed: false };
+
+    const frontmatterMatch = content.match(/^(\uFEFF?---\r?\n)([\s\S]*?)(\r?\n---\s*(?:\r?\n|$))/);
+    if (frontmatterMatch) {
+        const [, opening, frontmatter, closing] = frontmatterMatch;
+        let parsed;
+        try {
+            parsed = (0, obsidian_1.parseYaml)(frontmatter);
+        }
+        catch {
+            parsed = null;
+        }
+        let field = null;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            if (Object.prototype.hasOwnProperty.call(parsed, "tags"))
+                field = "tags";
+            else if (Object.prototype.hasOwnProperty.call(parsed, "tag"))
+                field = "tag";
+        }
+        if (field) {
+            const replacements = new Map();
+            const yamlResult = addTagsToFrontmatter(frontmatter, field, newTags, caseSensitive, {
+                replacements,
+                placeholderCache: new Map(),
+                reservedTokens: new Set(newTags),
+            });
+            if (yamlResult.changed) {
+                let resolved = `${opening}${yamlResult.text}${closing}${content.slice(frontmatterMatch[0].length)}`;
+                for (const [placeholder, tag] of replacements)
+                    resolved = resolved.split(placeholder).join(tag);
+                return { text: resolved, changed: resolved !== content };
+            }
+            return { text: content, changed: false };
+        }
+    }
+
+    const newline = content.includes("\r\n") ? "\r\n" : "\n";
+    const frontmatterLength = frontmatterMatch ? frontmatterMatch[0].length : 0;
+    const body = content.slice(frontmatterLength);
+    const segments = splitMarkdownPostSegments(body);
+    const sourceTags = [...new Set(inlineSourceTags.map((tag) => normalizeTag(tag)).filter(Boolean))];
+    const targetPostIndices = new Set();
+    if (sourceTags.length > 0) {
+        let postIndex = -1;
+        for (const part of segments) {
+            if (part.type !== "post")
+                continue;
+            postIndex += 1;
+            if (sourceTags.some((tag) => containsActiveMarkdownTag(part.text, tag, caseSensitive)))
+                targetPostIndices.add(postIndex);
+        }
+    }
+    if (targetPostIndices.size === 0) {
+        // With no inline tags in the note, append to its last non-empty post.
+        // This also keeps new tags before a trailing horizontal separator.
+        let lastPostIndex = -1;
+        let preferredPostIndex = -1;
+        let postIndex = -1;
+        for (const part of segments) {
+            if (part.type !== "post")
+                continue;
+            postIndex += 1;
+            lastPostIndex = postIndex;
+            if (part.text.trim().length > 0)
+                preferredPostIndex = postIndex;
+        }
+        const targetIndex = preferredPostIndex >= 0 ? preferredPostIndex : lastPostIndex;
+        if (targetIndex >= 0)
+            targetPostIndices.add(targetIndex);
+    }
+
+    let changed = false;
+    let postIndex = -1;
+    for (const part of segments) {
+        if (part.type !== "post")
+            continue;
+        postIndex += 1;
+        if (!targetPostIndices.has(postIndex))
+            continue;
+        const tagsToAdd = newTags.filter((tag) => !containsActiveMarkdownTag(part.text, tag, caseSensitive));
+        if (tagsToAdd.length === 0)
+            continue;
+        const trailingNewlines = part.text.match(/(?:\r?\n)*$/)?.[0] ?? "";
+        const core = part.text.slice(0, part.text.length - trailingNewlines.length);
+        const tagLine = tagsToAdd.map((tag) => `#${tag}`).join(" ");
+        if (core.trim().length === 0) {
+            part.text = `${tagLine}${trailingNewlines}`;
+        }
+        else {
+            part.text = `${core}${newline}${tagLine}${trailingNewlines}`;
+        }
+        changed = true;
+    }
+    return { text: `${content.slice(0, frontmatterLength)}${segments.map((part) => part.text).join("")}`, changed };
+}
+
 /** Apply queued tag operations to one file without writing it. */
 function replaceTagsInMarkdown(content, changes, caseSensitive) {
     const additions = changes.filter((change) => change.action === "add");
@@ -789,4 +905,4 @@ function findInlineTagIndex(content, tag, caseSensitive) {
     return match?.index ?? -1;
 }
 
-export { normalizeTag, tagKey, isValidTag, cleanTagInput, collectFrontmatterTags, replaceTagsInMarkdown, findInlineTagIndex, addTagsToMarkdown };
+export { normalizeTag, tagKey, isValidTag, cleanTagInput, collectFrontmatterTags, replaceTagsInMarkdown, findInlineTagIndex, addTagsToMarkdown, addTagsToMarkdownDocument };
