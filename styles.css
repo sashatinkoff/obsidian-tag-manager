@@ -946,3 +946,215 @@
   .tra-bulk-results-actions { margin-left: auto; }
   .tra-view .tra-bulk-sort-select { max-width: 135px; }
 }
+
+
+/* ===== v1.0.22: выбор заметок при применении очереди ===== */
+.modal.tra-apply-modal { width: min(760px, 94vw); }
+.tra-apply-files { display: grid; gap: 8px; margin: 14px 0 4px; }
+.tra-apply-files-header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.tra-apply-files-header strong { font-size: 13px; }
+.tra-apply-files-count { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.tra-apply-files-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tra-apply-files-filter { flex: 1 1 220px; min-width: 0; }
+.tra-apply-files-list { display: grid; gap: 4px; max-height: min(46vh, 420px); overflow-y: auto; overscroll-behavior: contain; padding: 2px; border: 1px solid var(--background-modifier-border); border-radius: 10px; }
+.tra-apply-file-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 7px 9px; border-radius: 8px; cursor: pointer; opacity: 0.62; }
+.tra-apply-file-row.is-selected { opacity: 1; background: var(--background-secondary); }
+.tra-apply-file-row:hover { background: var(--background-modifier-hover); }
+.tra-apply-file-row input { margin: 0; }
+.tra-apply-file-text { min-width: 0; }
+.tra-apply-file-name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tra-apply-file-path { font-size: 10px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tra-apply-file-tags { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 260px; }
+.tra-apply-file-open { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); box-shadow: none; }
+.tra-apply-file-open:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.tra-apply-file-open svg { width: 14px; height: 14px; }
+.tra-apply-files-empty { padding: 14px; text-align: center; color: var(--text-muted); font-size: 12px; }
+@media (max-width: 560px) {
+  .tra-apply-file-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .tra-apply-file-tags { grid-column: 2 / 4; justify-content: flex-start; max-width: none; }
+}
+
+/* ===== v1.0.24: раскладка, выбор заметок, окно предпросмотра ===== */
+/* Правая колонка — единый стек: высокий каталог тегов слева больше не растягивает строки сетки. */
+.tra-side-column { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.tra-view .tra-side-column > .tra-selected-card,
+.tra-view .tra-side-column > .tra-select-prompt,
+.tra-view .tra-side-column > .tra-queue-card { grid-column: auto; grid-row: auto; }
+.tra-tag-browser-card { grid-row: 1; }
+@media (max-width: 760px) {
+  .tra-side-column { grid-column: 1; grid-row: auto; }
+}
+
+/* Буквенная навигация — одна прокручиваемая строка вместо нескольких рядов кнопок. */
+.tra-alpha-nav { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; gap: 3px; padding-bottom: 4px; scrollbar-width: thin; }
+.tra-view .tra-alpha-button { flex: 0 0 auto; min-width: 23px; height: 23px; padding: 0 5px; border-radius: 7px; font-size: 10px; }
+
+/* Выбор заметок: общие элементы обеих вкладок. */
+.tra-view .tra-file-check { flex: 0 0 auto; width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: var(--tra-accent-strong); }
+.tra-file-card.is-excluded { opacity: 0.5; }
+.tra-file-card.is-excluded:hover { opacity: 0.8; }
+.tra-note-selection-count, .tra-bulk-selection-count { color: var(--tra-soft-text); font-size: 11px; font-variant-numeric: tabular-nums; }
+.tra-note-selection-bar, .tra-bulk-selection-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
+.tra-view .tra-note-selection-bar .tra-secondary-button,
+.tra-view .tra-bulk-selection-bar .tra-secondary-button { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 4px 10px; font-size: 11px; }
+.tra-note-selection-bar .tra-button-icon svg, .tra-bulk-selection-bar .tra-button-icon svg { width: 13px; height: 13px; }
+.tra-note-selection-hint { flex: 1 1 200px; color: var(--text-faint); font-size: 10px; text-align: right; }
+.tra-scope-hint { margin: 6px 0 2px; color: var(--tra-soft-text); font-size: 11px; }
+.tra-scope-hint.is-partial { color: var(--tra-accent-strong); font-weight: 600; }
+.tra-queue-files.is-partial { color: var(--tra-accent-strong); }
+.tra-bulk-select-all { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.tra-bulk-select-all input { margin: 0; accent-color: var(--tra-accent-strong); }
+.tra-bulk-note-card { cursor: pointer; }
+.tra-bulk-note-card:not(.is-selected) { opacity: 0.72; }
+.tra-bulk-note-card:hover { opacity: 1; border-color: color-mix(in srgb, var(--tra-accent-strong) 45%, var(--tra-border)); }
+.tra-view .tra-bulk-check { margin-top: 2px; }
+.tra-bulk-note-date { margin-top: 3px; color: var(--tra-soft-text); font-size: 10px; font-variant-numeric: tabular-nums; }
+.tra-bulk-date-source { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.tra-bulk-date-source label { color: var(--tra-soft-text); font-size: 11px; }
+.tra-bulk-date-stats { display: grid; gap: 5px; }
+.tra-bulk-hint-warning { color: var(--text-warning); }
+.tra-bulk-empty-details { margin-top: 6px; color: var(--text-faint); font-size: 11px; }
+
+/* Окно предпросмотра заметки. */
+.modal.tra-note-modal { width: min(860px, 94vw); max-height: 88vh; }
+.tra-note-preview { display: flex; flex-direction: column; min-height: 0; }
+.tra-note-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--background-modifier-border); }
+.tra-note-title-wrap { flex: 1 1 320px; min-width: 0; }
+.tra-modal > h2.tra-note-title, .tra-note-title { margin: 0 0 3px; font-size: 18px; overflow-wrap: anywhere; }
+.tra-note-path { color: var(--text-faint); font-size: 11px; overflow-wrap: anywhere; }
+.tra-note-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 8px; }
+.tra-note-date { margin-right: 4px; color: var(--tra-soft-text, var(--text-muted)); font-size: 11px; }
+.tra-note-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.tra-note-select { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
+.tra-note-select input { margin: 0; }
+.tra-note-actions .tra-secondary-button { display: inline-flex; align-items: center; gap: 6px; }
+.tra-note-actions .tra-button-icon svg { width: 14px; height: 14px; }
+.tra-note-body { margin-top: 12px; max-height: min(64vh, 720px); overflow-y: auto; overscroll-behavior: contain; padding-right: 6px; font-size: var(--font-text-size, 15px); line-height: 1.6; user-select: text; }
+.tra-note-body img { max-width: 100%; }
+.tra-note-body mark.tra-highlight { border-radius: 4px; }
+
+/* ===== v1.0.25: все теги заметки в окне просмотра ===== */
+.tra-note-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 8px; }
+.tra-note-tags-label { margin-right: 2px; color: var(--text-muted); font-size: 11px; font-weight: 600; }
+.tra-note-tag { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 3px 8px; border: 1px solid var(--background-modifier-border); border-radius: 99px; background: var(--background-secondary); color: var(--text-normal); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+.tra-note-tag-name { color: var(--text-accent); }
+.tra-note-tag-source { padding: 0 5px; border-radius: 99px; background: var(--background-modifier-border); color: var(--text-muted); font-size: 9px; text-transform: uppercase; letter-spacing: 0.03em; }
+.tra-note-tag.is-current { border-color: var(--tra-accent-strong, var(--interactive-accent)); background: color-mix(in srgb, var(--tra-accent, var(--interactive-accent)) 22%, var(--background-secondary)); font-weight: 650; }
+
+/* ===== v1.0.26: одинаковая полоса выбора на обеих вкладках ===== */
+.tra-bulk-results-card .tra-note-selection-bar { padding-bottom: 10px; border-bottom: 1px solid var(--tra-border); }
+.tra-note-selection-bar .tra-secondary-button:disabled { opacity: 0.45; cursor: default; }
+
+/* ===== v1.0.27: две зоны клика в карточке ===== */
+/* Шапка (название, путь, дата) — выбор заметки. */
+.tra-file-card .tra-file-title-row,
+.tra-file-card .tra-file-path,
+.tra-bulk-note-card .tra-bulk-note-header { cursor: pointer; }
+.tra-bulk-note-card .tra-bulk-note-header { margin: -6px -6px 0; padding: 6px; border-radius: 10px; transition: background-color 120ms ease; }
+.tra-bulk-note-card .tra-bulk-note-header:hover,
+.tra-file-card .tra-file-title-row:hover { background: color-mix(in srgb, var(--tra-accent) 12%, transparent); }
+.tra-file-card .tra-file-title-row { margin: -4px -4px 0; padding: 4px; border-radius: 8px; transition: background-color 120ms ease; }
+/* Текст и теги — открыть заметку в окне. */
+.tra-file-card .tra-excerpt,
+.tra-bulk-note-card .tra-bulk-note-excerpt,
+.tra-bulk-note-card .tra-bulk-note-footer { cursor: zoom-in; }
+.tra-file-card .tra-excerpt:hover,
+.tra-bulk-note-card .tra-bulk-note-excerpt:hover { color: var(--text-normal); }
+.tra-bulk-note-card { cursor: default; }
+
+/* ===== v1.0.28: предпросмотр изменений, записи, фильтры, статистика, телефон ===== */
+/* Предпросмотр изменений в окнах подтверждения. */
+.tra-apply-file { border-radius: 8px; }
+.tra-apply-file.is-selected .tra-apply-file-row { opacity: 1; background: var(--background-secondary); }
+.tra-apply-file:not(.is-selected) .tra-apply-file-row { opacity: 0.62; }
+.tra-apply-file-row { grid-template-columns: auto minmax(0, 1fr) auto auto auto auto; }
+.tra-apply-file-stat { color: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tra-apply-file-stat .is-add { color: var(--color-green, #4caf50); }
+.tra-apply-file-stat .is-del { color: var(--color-red, #e5534b); }
+.tra-apply-file-diff, .tra-apply-file-open { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); box-shadow: none; }
+.tra-apply-file-diff:hover, .tra-apply-file-open:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.tra-apply-file.is-diff-open .tra-apply-file-diff { color: var(--text-accent); }
+.tra-apply-file-diff svg { width: 14px; height: 14px; }
+.tra-review-diff:empty { display: none; }
+.tra-review-diff { margin: 2px 4px 8px 32px; border: 1px solid var(--background-modifier-border); border-radius: 8px; overflow: hidden; font-family: var(--font-monospace); font-size: 11px; }
+.tra-diff-hunk + .tra-diff-hunk { border-top: 1px dashed var(--background-modifier-border); }
+.tra-diff-line { display: grid; grid-template-columns: 3.2em 1.4em minmax(0, 1fr); align-items: baseline; line-height: 1.5; }
+.tra-diff-num { padding-right: 6px; color: var(--text-faint); text-align: right; user-select: none; }
+.tra-diff-sign { color: var(--text-faint); text-align: center; user-select: none; }
+.tra-diff-text { padding-right: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tra-diff-line.is-del { background: color-mix(in srgb, var(--color-red, #e5534b) 13%, transparent); }
+.tra-diff-line.is-add { background: color-mix(in srgb, var(--color-green, #4caf50) 13%, transparent); }
+.tra-diff-line.is-del .tra-diff-sign { color: var(--color-red, #e5534b); }
+.tra-diff-line.is-add .tra-diff-sign { color: var(--color-green, #4caf50); }
+.tra-diff-line.is-context { color: var(--text-muted); }
+.tra-diff-line.is-del mark.tra-diff-change { background: color-mix(in srgb, var(--color-red, #e5534b) 38%, transparent); color: inherit; border-radius: 3px; }
+.tra-diff-line.is-add mark.tra-diff-change { background: color-mix(in srgb, var(--color-green, #4caf50) 38%, transparent); color: inherit; border-radius: 3px; }
+.tra-diff-empty, .tra-diff-more, .tra-diff-error { padding: 7px 10px; color: var(--text-muted); font-family: var(--font-interface); }
+.tra-diff-error { color: var(--text-error); }
+
+/* Записи внутри заметки (окно просмотра). */
+.tra-post-bar { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -2px 0 10px; padding: 6px 0; background: var(--modal-background, var(--background-primary)); }
+.tra-post-count { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tra-post { margin: 0 0 10px; border: 1px solid var(--background-modifier-border); border-radius: 10px; transition: opacity 120ms ease; }
+.tra-post.is-excluded { opacity: 0.45; }
+.tra-post-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--background-modifier-border); border-radius: 10px 10px 0 0; background: var(--background-secondary); cursor: pointer; }
+.tra-post-head:hover { background: var(--background-modifier-hover); }
+.tra-post-head input { margin: 0; }
+.tra-post-title { font-size: 12px; font-weight: 600; }
+.tra-post-tag { margin-left: auto; color: var(--text-accent); font-size: 11px; }
+.tra-post-content { padding: 4px 12px; }
+.tra-post-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 99px; background: color-mix(in srgb, var(--tra-accent) 22%, transparent); color: var(--tra-accent-strong); font-size: 10px; font-weight: 600; white-space: nowrap; }
+.tra-post-badge:empty { display: none; }
+
+/* Фильтры «Заметок по датам». */
+.tra-bulk-filter-group { display: grid; gap: 9px; }
+.tra-bulk-filter-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tra-bulk-filter-field > label { color: var(--tra-soft-text); font-size: 11px; }
+.tra-chip-input { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-height: 34px; padding: 4px 6px; border: 1px solid var(--tra-border); border-radius: 10px; background: var(--background-primary); }
+.tra-chip-list { display: contents; }
+.tra-view .tra-chip-input input { flex: 1 1 90px; min-width: 70px; height: 24px; padding: 0 4px; border: 0; background: transparent; box-shadow: none; font-size: 12px; }
+.tra-chip { display: inline-flex; align-items: center; gap: 3px; padding: 2px 4px 2px 8px; border-radius: 99px; background: color-mix(in srgb, var(--tra-accent) 20%, var(--background-secondary)); color: var(--text-normal); font-size: 11px; }
+.tra-view .tra-chip-remove { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 99px; background: transparent; color: var(--text-muted); box-shadow: none; font-size: 13px; line-height: 1; }
+.tra-view .tra-chip-remove:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+
+/* Статистика тега по годам. */
+.tra-year-stats { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--tra-border); }
+.tra-year-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.tra-year-source { color: var(--text-faint); font-size: 10px; }
+.tra-year-chart { display: flex; align-items: stretch; gap: 3px; height: 120px; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; scrollbar-width: thin; }
+.tra-view .tra-year-bar { display: flex; flex: 1 0 22px; flex-direction: column; align-items: center; gap: 2px; min-width: 22px; max-width: 46px; height: 100%; padding: 0; border: 0; background: transparent; box-shadow: none; cursor: pointer; }
+.tra-view .tra-year-bar:disabled { cursor: default; }
+.tra-year-count { height: 13px; color: var(--tra-soft-text); font-size: 9px; font-variant-numeric: tabular-nums; }
+.tra-year-track { position: relative; display: flex; flex: 1 1 auto; align-items: flex-end; width: 100%; border-radius: 5px 5px 2px 2px; background: color-mix(in srgb, var(--text-muted) 7%, transparent); }
+.tra-year-fill { display: block; width: 100%; border-radius: 5px 5px 2px 2px; background: var(--tra-accent); transition: background-color 120ms ease; }
+.tra-view .tra-year-bar:not(:disabled):hover .tra-year-fill { background: var(--tra-accent-strong); }
+.tra-year-label { height: 13px; color: var(--text-faint); font-size: 9px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tra-year-empty { margin-top: 6px; color: var(--text-faint); font-size: 11px; }
+.tra-tag-sentinel { flex: 1 0 100%; padding: 6px; color: var(--text-faint); font-size: 10px; text-align: center; }
+
+/* Телефон и узкие экраны. */
+@media (max-width: 760px) {
+  .tra-view { padding: 10px 10px 18px; }
+  .tra-page-tabs { display: flex; width: 100%; }
+  .tra-page-tab { flex: 1 1 0; justify-content: center; }
+  .tra-bulk-layout { grid-template-columns: minmax(0, 1fr); }
+  .tra-bulk-note-list { grid-template-columns: minmax(0, 1fr); max-height: none; overflow: visible; }
+  .tra-preview-list { grid-template-columns: minmax(0, 1fr); }
+  .tra-tag-list { max-height: 42vh; }
+  .tra-note-selection-hint { display: none; }
+  .tra-review-diff { margin-left: 4px; }
+  .tra-apply-file-row { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
+  .tra-apply-file-tags { grid-column: 2 / -1; grid-row: 2; justify-content: flex-start; max-width: none; }
+  .modal.tra-note-modal, .modal.tra-apply-modal { width: 100vw; max-width: 100vw; }
+}
+/* Сенсорные экраны: крупнее зоны нажатия, без эффектов наведения. */
+.is-tra-mobile .tra-file-check, .is-mobile .tra-apply-file-row input, .is-mobile .tra-post-head input { width: 22px; height: 22px; }
+.is-tra-mobile .tra-note-selection-bar .tra-secondary-button,
+.is-tra-mobile .tra-bulk-selection-bar .tra-secondary-button,
+.is-tra-mobile .tra-alpha-button { min-height: 36px; min-width: 36px; }
+.is-tra-mobile .tra-tag-row { min-height: 36px; }
+.is-tra-mobile .tra-bulk-note-header, .is-tra-mobile .tra-file-title-row { padding: 8px; }
+.is-tra-mobile .tra-note-selection-hint { display: none; }
+.is-mobile .tra-apply-file-diff, .is-mobile .tra-apply-file-open { width: 36px; height: 36px; }
+/* Ширина 100% с внутренними отступами не должна вылезать за экран. */
+.tra-view { box-sizing: border-box; max-width: 100%; }
