@@ -1158,3 +1158,11 @@
 .is-mobile .tra-apply-file-diff, .is-mobile .tra-apply-file-open { width: 36px; height: 36px; }
 /* Ширина 100% с внутренними отступами не должна вылезать за экран. */
 .tra-view { box-sizing: border-box; max-width: 100%; }
+
+/* ===== v1.0.29: «Назад / Вперёд» в окне просмотра ===== */
+.tra-note-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; padding-bottom: 10px; border-bottom: 1px solid var(--background-modifier-border); }
+.tra-note-nav .tra-secondary-button { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; }
+.tra-note-nav .tra-button-icon svg { width: 15px; height: 15px; }
+.tra-note-nav .tra-secondary-button:disabled { opacity: 0.4; cursor: default; }
+.tra-note-position { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.is-mobile .tra-note-nav .tra-secondary-button { min-height: 40px; min-width: 96px; justify-content: center; }

@@ -16,18 +16,62 @@ class NotePreviewModal extends Modal {
      *                           в окне есть переключатель «Изменять эту заметку»
      * @param options.posts      { get(): {indices, count} | null, set(value | null): void } — если задан
      *                           и в заметке несколько записей (разделитель ---), их можно выбрать по отдельности
+     * @param options.navigation { files: TFile[], optionsFor(file): object } — список для кнопок
+     *                           «Назад / Вперёд»; optionsFor даёт selection/posts/highlightTag для заметки
      */
     constructor(app, file, options = {}) {
         super(app);
         this.file = file;
+        this.baseOptions = options;
         this.options = options;
+        this.navigation = options.navigation?.files?.length > 1 ? options.navigation : null;
         this.component = null;
+        this.keyHandler = null;
     }
     onOpen() {
+        this.modalEl?.addClass?.("tra-note-modal");
+        this.contentEl.addClass("tra-modal", "tra-note-preview");
+        if (this.navigation) {
+            // ← / → switch notes, except while typing in a field.
+            this.keyHandler = (event) => {
+                const target = event.target;
+                if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) && target.getAttribute("type") !== "checkbox"))
+                    return;
+                if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                    event.preventDefault();
+                    this.go(event.key === "ArrowLeft" ? -1 : 1);
+                }
+            };
+            document.addEventListener("keydown", this.keyHandler, true);
+        }
+        this.renderNote();
+    }
+    currentIndex() {
+        return this.navigation ? this.navigation.files.findIndex((candidate) => candidate.path === this.file.path) : -1;
+    }
+    /** Show the previous (-1) or next (+1) note of the navigation list. */
+    go(delta) {
+        if (!this.navigation)
+            return;
+        const files = this.navigation.files;
+        const next = this.currentIndex() + delta;
+        if (next < 0 || next >= files.length)
+            return;
+        this.file = files[next];
+        this.options = { ...this.baseOptions, ...(this.navigation.optionsFor?.(this.file) ?? {}) };
+        this.renderNote();
+    }
+    renderNote() {
         const { contentEl, file } = this;
         const plugin = this.options.plugin;
-        this.modalEl?.addClass?.("tra-note-modal");
-        contentEl.addClass("tra-modal", "tra-note-preview");
+        this.component?.unload();
+        this.component = null;
+        this.postState = null;
+        this.noteCheckbox = null;
+        this.postCountEl = null;
+        contentEl.empty();
+        if (this.navigation)
+            this.renderNavigation(contentEl);
 
         const header = contentEl.createDiv({ cls: "tra-note-header" });
         const titleWrap = header.createDiv({ cls: "tra-note-title-wrap" });
@@ -85,6 +129,8 @@ class NotePreviewModal extends Modal {
         void this.renderBody(body);
     }
     async renderBody(body) {
+        // Captured now: after navigating to another note this.component is replaced.
+        const component = this.component;
         try {
             const raw = await this.app.vault.cachedRead(this.file);
             if (!body.isConnected && !this.contentEl.contains(body))
@@ -101,7 +147,7 @@ class NotePreviewModal extends Modal {
                 body.createDiv({ cls: "tra-bulk-excerpt-empty", text: "Пустая заметка" });
                 return;
             }
-            await MarkdownRenderer.render(this.app, markdown, body, this.file.path, this.component);
+            await MarkdownRenderer.render(this.app, markdown, body, this.file.path, component);
             const tag = this.options.highlightTag;
             if (tag && this.options.plugin) {
                 highlightTagInElement(body, tag, this.options.plugin.settings.caseSensitive);
@@ -114,6 +160,7 @@ class NotePreviewModal extends Modal {
     }
     /** Each record separately, with a checkbox: changes then touch only the checked records. */
     async renderPosts(body, posts, count) {
+        const component = this.component;
         const control = this.options.posts;
         const meaningful = posts.filter((post) => !post.isEmpty).map((post) => post.index);
         this.postState = { control, meaningful, count };
@@ -152,7 +199,7 @@ class NotePreviewModal extends Modal {
                 this.updatePosts(current);
             });
             const content = block.createDiv({ cls: "tra-post-content markdown-rendered" });
-            await MarkdownRenderer.render(this.app, post.text.trim(), content, this.file.path, this.component);
+            await MarkdownRenderer.render(this.app, post.text.trim(), content, this.file.path, component);
             if (tag)
                 highlightTagInElement(content, tag, caseSensitive);
         }
@@ -242,7 +289,27 @@ class NotePreviewModal extends Modal {
                 chip.createSpan({ cls: "tra-note-tag-source", text: inText ? "YAML + текст" : "YAML" });
         }
     }
+    renderNavigation(parent) {
+        const files = this.navigation.files;
+        const index = this.currentIndex();
+        const nav = parent.createDiv({ cls: "tra-note-nav" });
+        const prev = nav.createEl("button", { cls: "tra-secondary-button tra-note-prev", attr: { type: "button", title: "Предыдущая заметка (←)", "aria-label": "Предыдущая заметка" } });
+        setIcon(prev.createSpan({ cls: "tra-button-icon" }), "chevron-left");
+        prev.createSpan({ text: "Назад" });
+        nav.createSpan({ cls: "tra-note-position", text: `${index + 1} из ${files.length}` });
+        const next = nav.createEl("button", { cls: "tra-secondary-button tra-note-next", attr: { type: "button", title: "Следующая заметка (→)", "aria-label": "Следующая заметка" } });
+        next.createSpan({ text: "Вперёд" });
+        setIcon(next.createSpan({ cls: "tra-button-icon" }), "chevron-right");
+        prev.disabled = index <= 0;
+        next.disabled = index < 0 || index >= files.length - 1;
+        prev.addEventListener("click", () => this.go(-1));
+        next.addEventListener("click", () => this.go(1));
+    }
     onClose() {
+        if (this.keyHandler) {
+            document.removeEventListener("keydown", this.keyHandler, true);
+            this.keyHandler = null;
+        }
         this.component?.unload();
         this.component = null;
         this.contentEl.empty();

@@ -168,13 +168,17 @@ class FileReviewList {
             const open = row.createEl("button", { cls: "tra-apply-file-open", attr: { type: "button", title: "Просмотреть заметку", "aria-label": `Просмотреть ${file.basename}` } });
             setIcon(open, "eye");
             open.addEventListener("click", () => {
+                const optionsFor = (target) => ({
+                    selection: {
+                        isSelected: () => this.selectedPaths.has(target.path),
+                        toggle: () => this.setSelected(target.path, !this.selectedPaths.has(target.path)),
+                    },
+                });
                 new NotePreviewModal(this.app, file, {
                     plugin: this.plugin,
                     highlightTag: this.options.highlightTag,
-                    selection: {
-                        isSelected: () => this.selectedPaths.has(file.path),
-                        toggle: () => this.setSelected(file.path, !this.selectedPaths.has(file.path)),
-                    },
+                    ...optionsFor(file),
+                    navigation: { files: [...this.visibleFiles()], optionsFor },
                 }).open();
             });
             wrapper.createDiv({ cls: "tra-review-diff" });

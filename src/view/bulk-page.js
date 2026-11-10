@@ -609,23 +609,7 @@ class BulkPageMixin {
             const created = this.getNoteCreationTimestamp(file);
             title.createDiv({ cls: "tra-bulk-note-date", text: created ? new Date(created).toLocaleDateString() : "Без даты" });
             title.createSpan({ cls: "tra-post-badge" });
-            const openPreview = () => new NotePreviewModal(this.plugin.app, file, {
-                plugin: this.plugin,
-                selection: {
-                    isSelected: () => this.bulkSelectedPaths.has(file.path),
-                    toggle: () => this.toggleBulkFile(file.path),
-                },
-                posts: {
-                    get: () => this.bulkPostSelection.get(file.path) ?? null,
-                    set: (value) => {
-                        if (value)
-                            this.bulkPostSelection.set(file.path, value);
-                        else
-                            this.bulkPostSelection.delete(file.path);
-                        this.syncBulkSelectionUI();
-                    },
-                },
-            }).open();
+            const openPreview = () => this.openBulkPreview(file);
             // Two click zones: the header (title, path, date) toggles the
             // checkbox, the text and tags open the note in a window.
             card.addEventListener("click", (event) => {
@@ -703,6 +687,30 @@ class BulkPageMixin {
             if (parent.isConnected)
                 parent.setText("Не удалось загрузить предпросмотр заметки.");
         }
+    }
+    /** Preview window with «Назад / Вперёд» over the filtered notes. */
+    openBulkPreview(file) {
+        const optionsFor = (target) => ({
+            selection: {
+                isSelected: () => this.bulkSelectedPaths.has(target.path),
+                toggle: () => this.toggleBulkFile(target.path),
+            },
+            posts: {
+                get: () => this.bulkPostSelection.get(target.path) ?? null,
+                set: (value) => {
+                    if (value)
+                        this.bulkPostSelection.set(target.path, value);
+                    else
+                        this.bulkPostSelection.delete(target.path);
+                    this.syncBulkSelectionUI();
+                },
+            },
+        });
+        new NotePreviewModal(this.plugin.app, file, {
+            plugin: this.plugin,
+            ...optionsFor(file),
+            navigation: { files: [...this.bulkVisibleFiles], optionsFor },
+        }).open();
     }
     toggleBulkFile(path) {
         if (this.bulkSelectedPaths.has(path))

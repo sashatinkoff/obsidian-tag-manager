@@ -600,17 +600,29 @@ class AuditPageMixin {
         this.contentEl.scrollTop = 0;
     }
     openNotePreview(file, highlightTag, selection, info = null) {
-        const posts = info ? {
-            get: () => this.postSelection.get(file.path) ?? null,
-            set: (value) => {
-                if (value)
-                    this.postSelection.set(file.path, value);
-                else
-                    this.postSelection.delete(file.path);
-                this.syncNoteSelectionUI(info);
+        // Per-note handles, also used when paging through the tag's notes.
+        const optionsFor = (target) => info ? {
+            highlightTag,
+            selection: {
+                isSelected: () => this.getNoteSelection(info).has(target.path),
+                toggle: () => this.toggleNoteSelection(info, target.path),
             },
-        } : undefined;
-        new NotePreviewModal(this.plugin.app, file, { plugin: this.plugin, highlightTag, selection, posts }).open();
+            posts: {
+                get: () => this.postSelection.get(target.path) ?? null,
+                set: (value) => {
+                    if (value)
+                        this.postSelection.set(target.path, value);
+                    else
+                        this.postSelection.delete(target.path);
+                    this.syncNoteSelectionUI(info);
+                },
+            },
+        } : { highlightTag, selection };
+        new NotePreviewModal(this.plugin.app, file, {
+            plugin: this.plugin,
+            ...optionsFor(file),
+            navigation: info ? { files: info.files, optionsFor } : undefined,
+        }).open();
     }
     renderPreviews(parent, info) {
         const files = info.files;
