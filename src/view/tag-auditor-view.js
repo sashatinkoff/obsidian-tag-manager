@@ -5,6 +5,8 @@ const { BULK_PAGE_SIZE, VIEW_TYPE } = require("../constants.js");
 const { applyMixins, relativeTime } = require("../utils.js");
 const { AuditPageMixin } = require("./audit-page.js");
 const { BulkPageMixin } = require("./bulk-page.js");
+const { AttributesPageMixin } = require("./attributes-page.js");
+const { ExtractPageMixin } = require("./extract-page.js");
 
 class TagAuditorView extends ItemView {
     constructor(leaf, plugin) {
@@ -30,6 +32,18 @@ class TagAuditorView extends ItemView {
         this.bulkFilterApplied = false;
         this.bulkDateSort = "newest";
         this.bulkAlwaysAddToAttributes = false;
+        this.attrFolder = "";
+        this.attrDateFrom = "";
+        this.attrDateTo = "";
+        this.attrTag = "";
+        this.attrQuery = "";
+        this.attrKey = "";
+        this.attrValue = "";
+        this.attrAddFilenameDate = false;
+        this.attrVisibleFiles = [];
+        this.attrSelectedPaths = new Set();
+        this.extractFolder = "";
+        this.extractQuarantine = "quarantine";
         this.bulkAction = "add";
         this.bulkInputs = { add: "", rename: "", delete: "", move: "" };
         this.bulkSelectedPaths = new Set();
@@ -230,8 +244,32 @@ class TagAuditorView extends ItemView {
             }
         });
 
+        const attributesTab = pageTabs.createEl("button", {
+            cls: `tra-page-tab${this.activePage === "attributes" ? " is-active" : ""}`,
+            attr: { type: "button", role: "tab", "aria-selected": String(this.activePage === "attributes") },
+        });
+        setIcon(attributesTab.createSpan({ cls: "tra-page-tab-icon" }), "file-pen-line");
+        attributesTab.createSpan({ text: "Атрибуты YAML" });
+        attributesTab.addEventListener("click", () => {
+            if (this.activePage !== "attributes") { this.activePage = "attributes"; this.render(); }
+        });
+
+        const extractTab = pageTabs.createEl("button", {
+            cls: `tra-page-tab${this.activePage === "extract" ? " is-active" : ""}`,
+            attr: { type: "button", role: "tab", "aria-selected": String(this.activePage === "extract") },
+        });
+        setIcon(extractTab.createSpan({ cls: "tra-page-tab-icon" }), "scissors");
+        extractTab.createSpan({ text: "Разделение записей" });
+        extractTab.addEventListener("click", () => {
+            if (this.activePage !== "extract") { this.activePage = "extract"; this.render(); }
+        });
+
         if (this.activePage === "bulk")
             this.renderBulkManagement(shell);
+        else if (this.activePage === "attributes")
+            this.renderAttributesManagement(shell);
+        else if (this.activePage === "extract")
+            this.renderExtractManagement(shell);
         else
             this.renderAuditPage(shell, previousTagListScrollTop);
         this.renderFooter(shell);
@@ -262,6 +300,6 @@ class TagAuditorView extends ItemView {
         return this.plugin.getNoteCreationTimestamp(file);
     }
 }
-applyMixins(TagAuditorView, AuditPageMixin, BulkPageMixin);
+applyMixins(TagAuditorView, AuditPageMixin, BulkPageMixin, AttributesPageMixin, ExtractPageMixin);
 
 module.exports = { TagAuditorView };
